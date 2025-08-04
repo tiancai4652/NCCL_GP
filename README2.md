@@ -128,7 +128,7 @@ make -j$(nproc)
 
 # 4. 编译测试程序
 cd ..
-g++ -std=c++11 -O2 -I./src/include test_improved_flow.cpp src/flow_info.cc -o flow_test
+g++ -std=c++11 -O2 -I./src/include test_improved_flow.cpp src/flow_info.cc -o flow_test_improved
 ```
 
 #### 方案2：使用编译脚本
@@ -147,7 +147,7 @@ docker run -it --rm -v ${PWD}:/workspace ubuntu:20.04
 apt update && apt install -y build-essential
 cd /workspace/NCCL_GP
 make -C src
-g++ -std=c++11 -O2 -I./src/include test_improved_flow.cpp src/flow_info.cc -o flow_test
+g++ -std=c++11 -O2 -I./src/include test_improved_flow.cpp src/flow_info.cc -o flow_test_improved
 ```
 
 ## 📖 使用指南
@@ -156,7 +156,7 @@ g++ -std=c++11 -O2 -I./src/include test_improved_flow.cpp src/flow_info.cc -o fl
 
 ```bash
 # 运行改进的测试程序
-./flow_test
+./flow_test_improved
 
 # 该程序会自动运行三个测试场景：
 # 1. RING + SIMPLE 算法测试 (AllReduce)
@@ -414,7 +414,7 @@ sudo dnf groupinstall "Development Tools"
 export CPLUS_INCLUDE_PATH=$CPLUS_INCLUDE_PATH:./src/include
 
 # 或在编译时指定
-g++ -I./src/include -I./src test_improved_flow.cpp src/flow_info.cc -o flow_test
+g++ -I./src/include -I./src test_improved_flow.cpp src/flow_info.cc -o flow_test_improved
 ```
 
 **问题3：链接错误**
@@ -423,7 +423,7 @@ g++ -I./src/include -I./src test_improved_flow.cpp src/flow_info.cc -o flow_test
 make clean && make -j$(nproc)
 
 # 检查是否缺少依赖库
-ldd flow_test
+ldd flow_test_improved
 ```
 
 **问题4：类型冲突错误**
@@ -500,4 +500,4 @@ FlowCollector::getInstance()->disable();
 
 ---
 
-**🎉 快速验证**：运行 `./flow_test 4 1024 allreduce` 来快速验证工具是否正常工作！
+**🎉 快速验证**：运行 `./flow_test_improved` 来快速验证工具是否正常工作！
