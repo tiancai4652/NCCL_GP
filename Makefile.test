@@ -1,0 +1,92 @@
+# NCCL流信息提取工具测试程序Makefile
+
+# 编译器设置
+CXX = g++
+NVCC = nvcc
+CXXFLAGS = -std=c++11 -O2 -g -Wall
+NVCCFLAGS = -std=c++11 -O2 -g
+
+# 路径设置
+NCCL_HOME = .
+CUDA_HOME = /usr/local/cuda
+SRC_DIR = src
+INCLUDE_DIR = src/include
+
+# 包含路径
+INCLUDES = -I$(INCLUDE_DIR) -I$(CUDA_HOME)/include
+
+# 库路径和链接库
+LDFLAGS = -L$(CUDA_HOME)/lib64 -L$(NCCL_HOME)/build/lib
+LIBS = -lnccl -lcudart -lcuda
+
+# 源文件
+FLOW_SOURCES = $(SRC_DIR)/flow_info.cc
+TEST_SOURCE = test_flow_info.cc
+
+# 目标文件
+FLOW_OBJECTS = $(FLOW_SOURCES:.cc=.o)
+TEST_OBJECT = $(TEST_SOURCE:.cc=.o)
+
+# 目标程序
+TARGET = test_flow_info
+
+.PHONY: all clean test
+
+all: $(TARGET)
+
+# 编译流信息提取模块
+$(SRC_DIR)/%.o: $(SRC_DIR)/%.cc
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# 编译测试程序
+%.o: %.cc
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# 链接生成可执行文件
+$(TARGET): $(FLOW_OBJECTS) $(TEST_OBJECT)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(LIBS)
+
+# 运行测试
+test: $(TARGET)
+	@echo "=== 运行NCCL流信息提取测试 ==="
+	@echo "测试1: AllReduce, 4节点, 1KB数据"
+	./$(TARGET) 4 1024 allreduce
+	@echo ""
+	@echo "测试2: AllGather, 8节点, 4KB数据"
+	./$(TARGET) 8 4096 allgather
+	@echo ""
+	@echo "测试3: Broadcast, 2节点, 512B数据"
+	./$(TARGET) 2 512 broadcast
+
+# 清理编译文件
+clean:
+	rm -f $(FLOW_OBJECTS) $(TEST_OBJECT) $(TARGET)
+	rm -f nccl_flow_log_*.txt
+
+# 安装依赖（如果需要）
+install-deps:
+	@echo "检查NCCL和CUDA依赖..."
+	@if [ ! -d "$(CUDA_HOME)" ]; then \
+		echo "错误: 未找到CUDA安装目录 $(CUDA_HOME)"; \
+		exit 1; \
+	fi
+	@if [ ! -f "build/lib/libnccl.so" ]; then \
+		echo "警告: 未找到NCCL库文件，请先编译NCCL"; \
+		echo "运行: make -j"; \
+	fi
+
+# 帮助信息
+help:
+	@echo "NCCL流信息提取工具编译帮助:"
+	@echo "  make all          - 编译测试程序"
+	@echo "  make test         - 运行测试用例"
+	@echo "  make clean        - 清理编译文件"
+	@echo "  make install-deps - 检查依赖"
+	@echo "  make help         - 显示此帮助信息"
+	@echo ""
+	@echo "测试程序用法:"
+	@echo "  ./test_flow_info [节点数] [数据大小] [通信类型]"
+	@echo "  通信类型: allreduce, allgather, broadcast, reduce"
+	@echo ""
+	@echo "示例:"
+	@echo "  ./test_flow_info 4 1024 allreduce"

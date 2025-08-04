@@ -6,6 +6,7 @@
 
 #include "enqueue.h"
 #include "argcheck.h"
+#include "flow_info.h"
 #include "coll_net.h"
 #include "gdrwrap.h"
 #include "bootstrap.h"
@@ -309,6 +310,14 @@ static ncclResult_t addCollToPlan(
     *nWorkBudget += chans[c].nWork;
     if (!regBufUsed) {
       appendWorkElemColl(comm, plan, c, funcIndex, workElem, bid);
+      
+      // 流信息提取：记录工作元素创建信息
+      if (ncclFlowCollector::getInstance()->isEnabled()) {
+        char stepInfo[256];
+        snprintf(stepInfo, sizeof(stepInfo), 
+                 "通道 %d: 创建工作元素 bid=%d, 函数索引=%d", c, bid, funcIndex);
+        FLOW_INFO_ADD_STEP(c, bid, stepInfo);
+      }
     } else {
       // Buffer registration in play which could only for CollNet at the moment.
       struct ncclChannel* channel = &comm->channels[c];
@@ -330,6 +339,14 @@ static ncclResult_t addCollToPlan(
         workElemReg.upOutputs[i] = regBufRecv[j];
       }
       appendWorkElemColl(comm, plan, c, funcIndex, &workElemReg, bid);
+      
+      // 流信息提取：记录注册缓冲区工作元素创建信息
+      if (ncclFlowCollector::getInstance()->isEnabled()) {
+        char stepInfo[256];
+        snprintf(stepInfo, sizeof(stepInfo), 
+                 "通道 %d: 创建注册缓冲区工作元素 bid=%d, 函数索引=%d", c, bid, funcIndex);
+        FLOW_INFO_ADD_STEP(c, bid, stepInfo);
+      }
     }
     *nWorkBudget -= chans[c].nWork; // subtract delta of chans[c].nWork
 
@@ -1184,6 +1201,11 @@ static ncclResult_t getAlgoInfo(struct ncclInfo* info, int collNetTypeSupport, i
     }
     //if (comm->rank == 0) INFO(NCCL_TUNING, "%ld Bytes -> Algo %d proto %d time %f", info->nBytes, info->algorithm, info->protocol, minTime);
     TRACE(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %f", info->nBytes, info->algorithm, info->protocol, minTime);
+    
+    // 流信息提取：记录算法选择信息
+    char reasonBuf[512];
+    snprintf(reasonBuf, sizeof(reasonBuf), "基于性能模型选择，预估时间: %.2f us，数据量: %ld bytes", minTime, info->nBytes);
+    FLOW_INFO_SET_ALGORITHM(info->algorithm, info->protocol, 0, 0, 0, 0.0, minTime, reasonBuf);
   }
 
   int nc = (info->nChannels > 0) ? info->nChannels : comm->nChannels;
@@ -1219,6 +1241,22 @@ static ncclResult_t getAlgoInfo(struct ncclInfo* info, int collNetTypeSupport, i
   nt = nt/WARP_SIZE < 3 ? 3*WARP_SIZE : nt;
   info->nChannels = nc;
   info->nThreads = nt;
+  
+  // 流信息提取：更新详细的算法配置信息
+  if (ncclFlowCollector::getInstance()->isEnabled()) {
+    float bandwidth = (info->algorithm >= 0 && info->protocol >= 0) ? 
+                     comm->bandwidths[info->coll][info->algorithm][info->protocol] : 0.0;
+    float latency = (info->algorithm >= 0 && info->protocol >= 0) ? 
+                   comm->latencies[info->coll][info->algorithm][info->protocol] : 0.0;
+    size_t chunkSize = comm->buffSizes[info->protocol] / NCCL_STEPS;
+    
+    char detailedReason[512];
+    snprintf(detailedReason, sizeof(detailedReason), 
+             "算法选择完成 - 通道数: %d, 线程数: %d, 块大小: %zu bytes, 带宽: %.2f GB/s, 延迟: %.2f us", 
+             nc, nt, chunkSize, bandwidth, latency);
+    
+    FLOW_INFO_SET_ALGORITHM(info->algorithm, info->protocol, nc, nt, chunkSize, bandwidth, latency, detailedReason);
+  }
   return ncclSuccess;
 }
 

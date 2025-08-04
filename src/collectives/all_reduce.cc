@@ -6,6 +6,7 @@
 
 #include "enqueue.h"
 #include "nccl.h"
+#include "flow_info.h"
 
 NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
@@ -27,5 +28,9 @@ ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
   struct ncclInfo info = { ncclFuncAllReduce, "AllReduce",
     sendbuff, recvbuff, count, datatype, op, 0, comm, stream, /* Args */
     ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS };
+  
+  // 初始化流信息提取
+  FLOW_INFO_INIT(comm, ncclFuncAllReduce, count * ncclTypeSize(datatype), datatype);
+  
   return ncclEnqueueCheck(&info);
 }
