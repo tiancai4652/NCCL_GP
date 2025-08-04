@@ -39,7 +39,7 @@ ncclFlowCollector::~ncclFlowCollector() {
 }
 
 // 初始化流信息收集
-void ncclFlowCollector::initFlow(ncclComm* comm, ncclFunc_t collective, size_t bytes, ncclDataType_t dataType) {
+void ncclFlowCollector::initFlow(ncclComm* comm, int collective, size_t bytes, int dataType) {
     if (!enabled) return;
     
     // 重置流信息

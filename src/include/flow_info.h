@@ -15,8 +15,9 @@
 
 // 前向声明，避免循环依赖
 struct ncclComm;
-typedef int ncclFunc_t;
-typedef int ncclDataType_t;
+
+// 不重新定义类型，使用已有的枚举类型
+// ncclFunc_t 和 ncclDataType_t 在其他头文件中已定义
 
 // 流信息步骤类型
 enum ncclFlowStepType {
@@ -41,7 +42,7 @@ struct ncclFlowStep {
 
 // 算法选择信息
 struct ncclAlgorithmInfo {
-  ncclFunc_t collective;         // 集合通信类型
+  int collective;                // 集合通信类型 (使用int避免类型冲突)
   int algorithm;                 // 选择的算法(RING/TREE等)
   int protocol;                  // 选择的协议(LL/LL128/SIMPLE)
   int nChannels;                 // 使用的通道数
@@ -58,7 +59,7 @@ struct ncclFlowInfo {
   int rank;                      // 当前节点rank
   int nRanks;                    // 总节点数
   size_t totalBytes;             // 总数据量
-  ncclDataType_t dataType;       // 数据类型
+  int dataType;                  // 数据类型 (使用int避免类型冲突)
   
   // 算法信息
   ncclAlgorithmInfo algInfo;
@@ -89,7 +90,7 @@ public:
   bool isEnabled() const { return enabled; }
   
   // 初始化流信息收集
-  void initFlow(ncclComm* comm, ncclFunc_t collective, size_t bytes, ncclDataType_t dataType);
+  void initFlow(ncclComm* comm, int collective, size_t bytes, int dataType);
   
   // 设置算法信息
   void setAlgorithmInfo(int algorithm, int protocol, int nChannels, int nThreads, 
