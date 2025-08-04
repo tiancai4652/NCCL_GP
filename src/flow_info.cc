@@ -59,13 +59,41 @@ void ncclFlowCollector::initFlow(ncclComm* comm, int collective, size_t bytes, i
            collective, bytes);
 }
 
+// 算法名称映射
+const char* getAlgorithmName(int algorithm) {
+    switch (algorithm) {
+        case 0: return "TREE";
+        case 1: return "RING";
+        case 2: return "COLLNET_DIRECT";
+        case 3: return "COLLNET_CHAIN";
+        case 4: return "NVLS";
+        case 5: return "NVLS_TREE";
+        default: return "UNKNOWN";
+    }
+}
+
+// 协议名称映射
+const char* getProtocolName(int protocol) {
+    switch (protocol) {
+        case 0: return "LL";
+        case 1: return "LL128";
+        case 2: return "SIMPLE";
+        default: return "UNKNOWN";
+    }
+}
+
 // 设置算法信息
 void ncclFlowCollector::setAlgorithmInfo(int algorithm, int protocol, int nChannels, int nThreads, 
                                         size_t chunkSize, float bandwidth, float latency, const char* reason) {
     if (!enabled) return;
     
-    currentFlow.algInfo.algorithm = algorithm;
-    currentFlow.algInfo.protocol = protocol;
+    // 转换算法和协议为字符串
+    strncpy(currentFlow.algInfo.algorithm, getAlgorithmName(algorithm), sizeof(currentFlow.algInfo.algorithm) - 1);
+    currentFlow.algInfo.algorithm[sizeof(currentFlow.algInfo.algorithm) - 1] = '\0';
+    
+    strncpy(currentFlow.algInfo.protocol, getProtocolName(protocol), sizeof(currentFlow.algInfo.protocol) - 1);
+    currentFlow.algInfo.protocol[sizeof(currentFlow.algInfo.protocol) - 1] = '\0';
+    
     currentFlow.algInfo.nChannels = nChannels;
     currentFlow.algInfo.nThreads = nThreads;
     currentFlow.algInfo.chunkSize = chunkSize;
@@ -77,8 +105,8 @@ void ncclFlowCollector::setAlgorithmInfo(int algorithm, int protocol, int nChann
         currentFlow.algInfo.reason[sizeof(currentFlow.algInfo.reason) - 1] = '\0';
     }
     
-    printf("[流信息] 算法选择 - 算法: %d, 协议: %d, 通道数: %d, 线程数: %d\n", 
-           algorithm, protocol, nChannels, nThreads);
+    printf("[流信息] 算法选择 - 算法: %s, 协议: %s, 通道数: %d, 线程数: %d\n", 
+           currentFlow.algInfo.algorithm, currentFlow.algInfo.protocol, nChannels, nThreads);
     printf("[流信息] 选择原因: %s\n", reason ? reason : "未指定");
 }
 
@@ -168,8 +196,8 @@ void ncclFlowCollector::printFlowInfo() {
     
     printf("\n算法选择信息:\n");
     printf("  集合通信类型: %d\n", currentFlow.algInfo.collective);
-    printf("  选择算法: %d\n", currentFlow.algInfo.algorithm);
-    printf("  选择协议: %d\n", currentFlow.algInfo.protocol);
+    printf("  选择算法: %s\n", currentFlow.algInfo.algorithm);
+    printf("  选择协议: %s\n", currentFlow.algInfo.protocol);
     printf("  通道数: %d\n", currentFlow.algInfo.nChannels);
     printf("  线程数: %d\n", currentFlow.algInfo.nThreads);
     printf("  块大小: %zu bytes\n", currentFlow.algInfo.chunkSize);
@@ -183,11 +211,9 @@ void ncclFlowCollector::printFlowInfo() {
     } else {
         for (size_t i = 0; i < currentFlow.steps.size(); i++) {
             const ncclFlowStep& step = currentFlow.steps[i];
-            printf("  步骤%d: [通道%d] %s\n", step.stepId, step.channel, step.description);
-            if (step.srcRank >= 0 && step.dstRank >= 0) {
-                printf("         从节点%d到节点%d, 数据量: %zu bytes\n", 
-                       step.srcRank, step.dstRank, step.dataSize);
-            }
+            printf("  通道%d步骤%d: %s\n", step.channel, step.stepId, step.description);
+            printf("    源节点: %d, 目标节点: %d, 数据量: %zu bytes\n", 
+                   step.srcRank, step.dstRank, step.dataSize);
         }
     }
     
@@ -224,8 +250,8 @@ void ncclFlowCollector::saveToFile(const char* filename) {
     // 写入算法信息
     fprintf(file, "\n[算法选择]\n");
     fprintf(file, "集合通信类型=%d\n", currentFlow.algInfo.collective);
-    fprintf(file, "算法=%d\n", currentFlow.algInfo.algorithm);
-    fprintf(file, "协议=%d\n", currentFlow.algInfo.protocol);
+    fprintf(file, "算法=%s\n", currentFlow.algInfo.algorithm);
+    fprintf(file, "协议=%s\n", currentFlow.algInfo.protocol);
     fprintf(file, "通道数=%d\n", currentFlow.algInfo.nChannels);
     fprintf(file, "线程数=%d\n", currentFlow.algInfo.nThreads);
     fprintf(file, "块大小=%zu\n", currentFlow.algInfo.chunkSize);

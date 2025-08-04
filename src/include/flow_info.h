@@ -43,8 +43,8 @@ struct ncclFlowStep {
 // 算法选择信息
 struct ncclAlgorithmInfo {
   int collective;                // 集合通信类型 (使用int避免类型冲突)
-  int algorithm;                 // 选择的算法(RING/TREE等)
-  int protocol;                  // 选择的协议(LL/LL128/SIMPLE)
+  char algorithm[64];            // 选择的算法(RING/TREE等)
+  char protocol[64];             // 选择的协议(LL/LL128/SIMPLE)
   int nChannels;                 // 使用的通道数
   int nThreads;                  // 每个块的线程数
   size_t chunkSize;              // 数据块大小
