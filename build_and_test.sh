@@ -1,177 +1,132 @@
 #!/bin/bash
 
-echo "=== NCCL流信息提取工具编译和测试脚本 ==="
+# NCCL流信息提取工具 Linux编译和测试脚本
+# 适用于Ubuntu/Debian/CentOS/RHEL等Linux发行版
 
-# 设置颜色输出
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+set -e  # 遇到错误立即退出
 
-# 检查必要的依赖
-echo -e "${YELLOW}步骤1: 检查编译环境...${NC}"
+echo "=== NCCL流信息提取工具 Linux编译测试 ==="
+echo
 
-# 检查编译器
-if ! command -v g++ &> /dev/null; then
-    echo -e "${RED}错误: 未找到g++编译器${NC}"
+# 检查编译环境
+echo "步骤1: 检查编译环境..."
+
+# 检查是否有C++编译器
+if command -v g++ >/dev/null 2>&1; then
+    echo "✓ 找到g++编译器: $(g++ --version | head -n1)"
+elif command -v clang++ >/dev/null 2>&1; then
+    echo "✓ 找到clang++编译器: $(clang++ --version | head -n1)"
+    export CXX=clang++
+else
+    echo "✗ 错误: 未找到C++编译器"
+    echo "请安装编译工具:"
+    echo "  Ubuntu/Debian: sudo apt install build-essential"
+    echo "  CentOS/RHEL:   sudo yum groupinstall 'Development Tools'"
+    echo "  Fedora:        sudo dnf groupinstall 'Development Tools'"
     exit 1
 fi
 
-# 检查CUDA（如果可用）
-if command -v nvcc &> /dev/null; then
-    echo -e "${GREEN}找到CUDA编译器: $(nvcc --version | grep release)${NC}"
-    CUDA_AVAILABLE=1
-else
-    echo -e "${YELLOW}警告: 未找到CUDA编译器，将使用CPU模拟模式${NC}"
-    CUDA_AVAILABLE=0
+# 检查make工具
+if ! command -v make >/dev/null 2>&1; then
+    echo "✗ 错误: 未找到make工具"
+    echo "请安装make工具"
+    exit 1
 fi
 
-echo -e "${GREEN}编译环境检查完成${NC}"
-echo ""
+echo "✓ 编译环境检查完成"
+echo
 
-# 编译NCCL库（如果需要）
-echo -e "${YELLOW}步骤2: 编译NCCL库...${NC}"
+# 创建必要的目录
+echo "步骤2: 创建构建目录..."
+mkdir -p build/obj
+mkdir -p build/lib
+echo "✓ 构建目录创建完成"
+echo
 
-if [ ! -f "build/lib/libnccl.so" ] && [ ! -f "build/lib/libnccl.a" ]; then
-    echo "开始编译NCCL库..."
-    cd src
-    if make -j$(nproc) 2>/dev/null; then
-        echo -e "${GREEN}NCCL库编译成功${NC}"
-    else
-        echo -e "${YELLOW}NCCL库编译失败，尝试使用现有库文件${NC}"
-    fi
-    cd ..
-else
-    echo -e "${GREEN}找到现有NCCL库文件${NC}"
-fi
+# 编译NCCL源文件
+echo "步骤3: 编译NCCL源文件..."
 
-echo ""
+# 设置编译参数
+CXXFLAGS="-std=c++11 -O2 -fPIC -Wall"
+INCLUDES="-I./src/include -I./src"
 
-# 编译流信息提取模块
-echo -e "${YELLOW}步骤3: 编译流信息提取模块...${NC}"
-
-# 创建简化的编译命令
-INCLUDES="-Isrc/include -I/usr/local/cuda/include"
-CXXFLAGS="-std=c++11 -O2 -g -Wall -fPIC"
-
-# 编译流信息模块
 echo "编译 flow_info.cc..."
-if g++ $CXXFLAGS $INCLUDES -c src/flow_info.cc -o src/flow_info.o; then
-    echo -e "${GREEN}flow_info.cc 编译成功${NC}"
-else
-    echo -e "${RED}flow_info.cc 编译失败${NC}"
-    exit 1
+${CXX:-g++} $CXXFLAGS $INCLUDES -c src/flow_info.cc -o build/obj/flow_info.o
+
+if [ -f "src/enqueue.cc" ]; then
+    echo "编译 enqueue.cc..."
+    ${CXX:-g++} $CXXFLAGS $INCLUDES -c src/enqueue.cc -o build/obj/enqueue.o 2>/dev/null || echo "⚠ enqueue.cc编译跳过(可能需要完整NCCL环境)"
 fi
 
-echo ""
+if [ -f "src/collectives/all_reduce.cc" ]; then
+    echo "编译 all_reduce.cc..."
+    ${CXX:-g++} $CXXFLAGS $INCLUDES -c src/collectives/all_reduce.cc -o build/obj/all_reduce.o 2>/dev/null || echo "⚠ all_reduce.cc编译跳过(可能需要完整NCCL环境)"
+fi
 
-# 创建简化的测试程序
-echo -e "${YELLOW}步骤4: 创建简化测试程序...${NC}"
-
-cat > simple_test.cc << 'EOF'
-#include <stdio.h>
-#include <string.h>
-#include "src/include/flow_info.h"
-
-int main(int argc, char* argv[]) {
-    printf("=== NCCL流信息提取工具简化测试 ===\n");
-    
-    // 解析参数
-    int nRanks = (argc > 1) ? atoi(argv[1]) : 4;
-    size_t dataSize = (argc > 2) ? atoi(argv[2]) : 1024;
-    const char* collType = (argc > 3) ? argv[3] : "allreduce";
-    
-    printf("测试参数:\n");
-    printf("  节点数: %d\n", nRanks);
-    printf("  数据大小: %zu bytes\n", dataSize);
-    printf("  集合通信类型: %s\n", collType);
-    printf("\n");
-    
-    // 启用流信息收集
-    ncclFlowCollector::getInstance()->enable();
-    printf("流信息收集已启用\n");
-    
-    // 模拟NCCL初始化和算法选择过程
-    printf("\n=== 模拟NCCL算法选择过程 ===\n");
-    
-    // 模拟算法选择
-    int algorithm = 1; // NCCL_ALGO_RING
-    int protocol = 0;  // NCCL_PROTO_SIMPLE
-    int nChannels = (nRanks <= 4) ? 2 : 4;
-    int nThreads = 256;
-    size_t chunkSize = 131072; // 128KB
-    float bandwidth = 10.0; // 10 GB/s
-    float latency = 5.0; // 5 us
-    
-    char reason[512];
-    snprintf(reason, sizeof(reason), 
-             "基于节点数%d和数据大小%zu选择Ring算法", nRanks, dataSize);
-    
-    FLOW_INFO_SET_ALGORITHM(algorithm, protocol, nChannels, nThreads, 
-                           chunkSize, bandwidth, latency, reason);
-    
-    // 模拟流生成过程
-    printf("模拟流生成过程...\n");
-    for (int c = 0; c < nChannels; c++) {
-        for (int step = 0; step < 3; step++) {
-            char stepInfo[256];
-            snprintf(stepInfo, sizeof(stepInfo), 
-                     "通道%d步骤%d: 发送%zu字节到下一个节点", 
-                     c, step, dataSize / nChannels);
-            FLOW_INFO_ADD_STEP(c, step, stepInfo);
-        }
-    }
-    
-    // 输出结果
-    printf("\n=== 流信息提取结果 ===\n");
-    ncclFlowCollector::getInstance()->printFlowInfo();
-    
-    // 保存到文件
-    char logFile[256];
-    snprintf(logFile, sizeof(logFile), "nccl_flow_%s_%d_%zu.log", 
-             collType, nRanks, dataSize);
-    ncclFlowCollector::getInstance()->saveToFile(logFile);
-    printf("\n流信息已保存到: %s\n", logFile);
-    
-    printf("\n=== 测试完成 ===\n");
-    return 0;
-}
-EOF
-
-echo -e "${GREEN}简化测试程序创建完成${NC}"
+echo "✓ 核心文件编译完成"
+echo
 
 # 编译测试程序
-echo "编译测试程序..."
-if g++ $CXXFLAGS $INCLUDES simple_test.cc src/flow_info.o -o simple_test; then
-    echo -e "${GREEN}测试程序编译成功${NC}"
-else
-    echo -e "${RED}测试程序编译失败${NC}"
-    exit 1
+echo "步骤4: 编译测试程序..."
+
+# 编译改进的测试程序
+if [ -f "test_improved_flow.cpp" ]; then
+    echo "编译改进测试程序..."
+    ${CXX:-g++} $CXXFLAGS $INCLUDES test_improved_flow.cpp build/obj/flow_info.o -o flow_test_improved
+    echo "✓ 改进测试程序编译完成: ./flow_test_improved"
 fi
 
-echo ""
+# 编译简化测试程序
+if [ -f "simple_flow_test.cpp" ]; then
+    echo "编译简化测试程序..."
+    ${CXX:-g++} $CXXFLAGS $INCLUDES simple_flow_test.cpp build/obj/flow_info.o -o flow_test_simple 2>/dev/null || echo "⚠ 简化测试程序编译跳过"
+fi
+
+# 编译完整测试程序
+if [ -f "test_flow_info.cc" ]; then
+    echo "编译完整测试程序..."
+    ${CXX:-g++} $CXXFLAGS $INCLUDES test_flow_info.cc build/obj/flow_info.o -o flow_test_full 2>/dev/null || echo "⚠ 完整测试程序编译跳过"
+fi
+
+echo "✓ 测试程序编译完成"
+echo
 
 # 运行测试
-echo -e "${YELLOW}步骤5: 运行测试用例...${NC}"
+echo "步骤5: 运行功能测试..."
 
-echo "测试1: AllReduce, 4节点, 1KB数据"
-./simple_test 4 1024 allreduce
-echo ""
+if [ -f "./flow_test_improved" ]; then
+    echo "运行改进测试程序..."
+    echo "----------------------------------------"
+    ./flow_test_improved
+    echo "----------------------------------------"
+    echo "✓ 改进测试程序运行完成"
+    
+    # 检查生成的日志文件
+    echo
+    echo "生成的日志文件:"
+    ls -la *.log 2>/dev/null || echo "未找到日志文件"
+    echo
+else
+    echo "⚠ 改进测试程序未编译成功，跳过测试"
+fi
 
-echo "测试2: AllGather, 8节点, 4KB数据"
-./simple_test 8 4096 allgather
-echo ""
+# 显示编译结果
+echo "步骤6: 编译结果总结..."
+echo "编译完成的程序:"
+[ -f "./flow_test_improved" ] && echo "  ✓ ./flow_test_improved - 改进测试程序(推荐)"
+[ -f "./flow_test_simple" ] && echo "  ✓ ./flow_test_simple - 简化测试程序"
+[ -f "./flow_test_full" ] && echo "  ✓ ./flow_test_full - 完整测试程序"
 
-echo "测试3: Broadcast, 2节点, 512B数据"
-./simple_test 2 512 broadcast
-echo ""
+echo
+echo "编译的目标文件:"
+ls -la build/obj/*.o 2>/dev/null || echo "  无目标文件"
 
-echo -e "${GREEN}所有测试完成！${NC}"
-echo ""
-
-# 显示生成的日志文件
-echo -e "${YELLOW}生成的日志文件:${NC}"
-ls -la nccl_flow_*.log 2>/dev/null || echo "未找到日志文件"
-
-echo ""
-echo -e "${GREEN}=== 编译和测试脚本执行完成 ===${NC}"
+echo
+echo "=== 编译测试完成 ==="
+echo
+echo "使用方法:"
+echo "  运行改进测试: ./flow_test_improved"
+echo "  查看日志文件: cat *.log"
+echo "  清理构建文件: rm -rf build/ *.log flow_test_*"
+echo
+echo "如遇到问题，请查看 编译问题修复说明.md 文档"

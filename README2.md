@@ -25,9 +25,9 @@ NCCL_GP/
 │   ├── collectives/
 │   │   └── all_reduce.cc        # 修改：添加流信息记录
 │   └── Makefile                 # 修改：添加编译目标
+├── test_improved_flow.cpp       # 改进的测试程序
 ├── simple_flow_test.cpp         # 简化测试程序
 ├── test_flow_info.cc           # 完整测试程序
-├── build_test.ps1              # Windows编译脚本
 ├── build_and_test.sh           # Linux编译脚本
 └── README2.md                  # 本文档
 ```
@@ -108,45 +108,37 @@ FlowCollector::getInstance()->endCollective();
 
 ## 🚀 编译指南
 
-### Linux/WSL环境（推荐）
+### Linux环境编译
 
+#### 方案1：直接编译（推荐）
 ```bash
-# 1. 进入项目目录
+# 1. 安装依赖
+# Ubuntu/Debian
+sudo apt update && sudo apt install -y build-essential
+
+# CentOS/RHEL
+sudo yum groupinstall "Development Tools"
+
+# 2. 进入项目目录
 cd NCCL_GP
 
-# 2. 编译NCCL库
+# 3. 编译NCCL库
 cd src
 make -j$(nproc)
 
-# 3. 编译测试程序
+# 4. 编译测试程序
 cd ..
-g++ -std=c++11 -O2 -I./src/include simple_flow_test.cpp -o flow_test
+g++ -std=c++11 -O2 -I./src/include test_improved_flow.cpp src/flow_info.cc -o flow_test
 ```
 
-### Windows环境
-
-#### 方案1：使用MinGW-w64
+#### 方案2：使用编译脚本
 ```bash
-# 安装MinGW-w64后
-cd NCCL_GP/src
-mingw32-make
-
-# 编译测试程序
-cd ..
-g++ -std=c++11 -O2 -I./src/include simple_flow_test.cpp -o flow_test.exe
+# 使用提供的编译脚本
+chmod +x build_and_test.sh
+./build_and_test.sh
 ```
 
-#### 方案2：使用Visual Studio
-```powershell
-# 设置VS环境变量
-call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
-
-# 编译
-cd NCCL_GP
-powershell -ExecutionPolicy Bypass -File build_test.ps1
-```
-
-#### 方案3：Docker编译（推荐）
+#### 方案3：Docker编译
 ```bash
 # 创建Docker容器
 docker run -it --rm -v ${PWD}:/workspace ubuntu:20.04
@@ -155,6 +147,7 @@ docker run -it --rm -v ${PWD}:/workspace ubuntu:20.04
 apt update && apt install -y build-essential
 cd /workspace/NCCL_GP
 make -C src
+g++ -std=c++11 -O2 -I./src/include test_improved_flow.cpp src/flow_info.cc -o flow_test
 ```
 
 ## 📖 使用指南
@@ -162,13 +155,17 @@ make -C src
 ### 1. 快速开始
 
 ```bash
-# 运行简化测试程序
-./flow_test 4 1024 allreduce
+# 运行改进的测试程序
+./flow_test
 
-# 参数说明：
-# 4      - 节点数量
-# 1024   - 数据大小（字节）
-# allreduce - 集合通信类型
+# 该程序会自动运行三个测试场景：
+# 1. RING + SIMPLE 算法测试 (AllReduce)
+# 2. TREE + LL128 算法测试 (Broadcast)  
+# 3. NVLS + LL 算法测试 (AllGather)
+
+# 查看生成的日志文件
+ls *.log
+cat improved_flow_test.log
 ```
 
 ### 2. 集成到仿真器
@@ -402,13 +399,13 @@ void setOutputFormat(OutputFormat format);
 **问题1：找不到make命令**
 ```bash
 # Ubuntu/Debian
-sudo apt install build-essential
+sudo apt update && sudo apt install build-essential
 
 # CentOS/RHEL
 sudo yum groupinstall "Development Tools"
 
-# Windows
-# 安装MinGW-w64或使用Visual Studio
+# Fedora
+sudo dnf groupinstall "Development Tools"
 ```
 
 **问题2：头文件找不到**
@@ -417,13 +414,23 @@ sudo yum groupinstall "Development Tools"
 export CPLUS_INCLUDE_PATH=$CPLUS_INCLUDE_PATH:./src/include
 
 # 或在编译时指定
-g++ -I./src/include ...
+g++ -I./src/include -I./src test_improved_flow.cpp src/flow_info.cc -o flow_test
 ```
 
 **问题3：链接错误**
 ```bash
 # 确保所有源文件都已编译
 make clean && make -j$(nproc)
+
+# 检查是否缺少依赖库
+ldd flow_test
+```
+
+**问题4：类型冲突错误**
+```bash
+# 如果遇到ncclFunc_t或ncclDataType_t类型冲突
+# 请参考编译问题修复说明.md文档
+cat 编译问题修复说明.md
 ```
 
 ### 常见运行问题
