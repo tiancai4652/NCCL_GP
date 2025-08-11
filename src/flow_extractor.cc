@@ -13,9 +13,50 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <errno.h>
 
 // 全局开关：是否启用流信息提取
 static int flowExtractionEnabled = 1;
+
+// 计算输出目录：output/<topo_base>
+static void getOutputDir(char* outDir, size_t outDirSize) {
+    const char* topo = getenv("NCCL_TOPO_FILE");
+    const char* base = topo ? strrchr(topo, '/') : NULL;
+    base = base ? base + 1 : topo;
+    char name[128] = {0};
+    if (base && *base) {
+        // 去除扩展名
+        size_t len = strnlen(base, sizeof(name)-1);
+        size_t dot = len;
+        for (size_t i = 0; i < len; ++i) {
+            if (base[i] == '.') { dot = i; break; }
+        }
+        if (dot > sizeof(name)-1) dot = sizeof(name)-1;
+        memcpy(name, base, dot);
+        name[dot] = '\0';
+    } else {
+        strncpy(name, "unknown_topo", sizeof(name)-1);
+    }
+    // 构造 output/<name>
+    snprintf(outDir, outDirSize, "output/%s", name);
+}
+
+static void ensureDir(const char* path) {
+    // 创建 output 和 output/<name>
+    // 首先创建 output
+    (void)mkdir("output", 0777);
+    if (errno != 0 && errno != EEXIST) {
+        // 忽略错误，尽最大努力
+        errno = 0;
+    }
+    // 然后创建 path
+    (void)mkdir(path, 0777);
+    if (errno != 0 && errno != EEXIST) {
+        errno = 0;
+    }
+}
 
 // 算法名称映射
 static const char* algorithmNames[] = {
@@ -603,8 +644,11 @@ extern "C" ncclResult_t ncclRecordProxyOp(const struct ncclInfo* info,
                                            const struct ncclProxyOp* proxyOp,
                                            struct ncclComm* comm) {
     if (!flowExtractionEnabled || info == nullptr || proxyOp == nullptr || comm == nullptr) return ncclSuccess;
-    char path[256];
-    snprintf(path, sizeof(path), "proxy_flow_rank%d.jsonl", comm->rank);
+    char outDir[256];
+    getOutputDir(outDir, sizeof(outDir));
+    ensureDir(outDir);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/proxy_flow_rank%d.jsonl", outDir, comm->rank);
     FILE* fp = fopen(path, "a");
     if (!fp) return ncclSystemError;
     // 简化记录：每个proxyOp一条记录，包含关键信息；peer信息可从channel ring/tree推导
@@ -620,8 +664,8 @@ extern "C" ncclResult_t ncclRecordProxyOp(const struct ncclInfo* info,
     fclose(fp);
 
     // 逐步展开：为每个step写两条（SEND/RECV），便于仿真器直接消费
-    char stepsPath[256];
-    snprintf(stepsPath, sizeof(stepsPath), "flow_steps_rank%d.jsonl", comm->rank);
+    char stepsPath[512];
+    snprintf(stepsPath, sizeof(stepsPath), "%s/flow_steps_rank%d.jsonl", outDir, comm->rank);
     FILE* fps = fopen(stepsPath, "a");
     if (!fps) return ncclSystemError;
     // 判定阶段
@@ -653,10 +697,13 @@ extern "C" ncclResult_t ncclRecordProxyOp(const struct ncclInfo* info,
 
 extern "C" ncclResult_t ncclWriteAggregatedFlow(struct ncclComm* comm) {
     if (comm == nullptr) return ncclInvalidArgument;
-    char stepsPath[256], proxyPath[256], outPath[256];
-    snprintf(stepsPath, sizeof(stepsPath), "flow_steps_rank%d.jsonl", comm->rank);
-    snprintf(proxyPath, sizeof(proxyPath), "proxy_flow_rank%d.jsonl", comm->rank);
-    snprintf(outPath, sizeof(outPath), "flow_rank%d.json", comm->rank);
+    char outDir[256];
+    getOutputDir(outDir, sizeof(outDir));
+    ensureDir(outDir);
+    char stepsPath[512], proxyPath[512], outPath[512];
+    snprintf(stepsPath, sizeof(stepsPath), "%s/flow_steps_rank%d.jsonl", outDir, comm->rank);
+    snprintf(proxyPath, sizeof(proxyPath), "%s/proxy_flow_rank%d.jsonl", outDir, comm->rank);
+    snprintf(outPath, sizeof(outPath), "%s/flow_rank%d.json", outDir, comm->rank);
 
     FILE* fps = fopen(stepsPath, "r");
     FILE* fpp = fopen(proxyPath, "r");
