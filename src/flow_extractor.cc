@@ -183,461 +183,16 @@ extern "C" ncclResult_t ncclSetFlowExtractionEnabled(int enable) {
     return ncclSuccess;
 }
 
-// 创建基础流信息结构
-static ncclResult_t createBaseFlow(struct ncclInfo* info, struct ncclCollectiveFlow** flow) {
-    struct ncclCollectiveFlow* f;
-    NCCLCHECK(ncclCalloc(&f, 1));
-    
-    // 填充基本信息（移除估算时间）
-    f->collType = info->coll;
-    f->algorithm = info->algorithm;
-    f->protocol = info->protocol;
-    f->pattern = info->pattern;
-    f->myRank = info->comm->rank;
-    f->nRanks = info->comm->nRanks;
-    f->nChannels = info->nChannels;
-    f->totalBytes = info->nBytes;
-    f->nLoops = 0; // 将在具体算法中计算
-    f->chunkSize = 0; // 将在具体算法中计算
-    
-    // 生成拓扑信息摘要
-    snprintf(f->topoInfo, sizeof(f->topoInfo), 
-             "nRanks=%d nChannels=%d algo=%s proto=%s pattern=%s",
-             f->nRanks, f->nChannels, 
-             ncclAlgorithmToString(f->algorithm),
-             ncclProtocolToString(f->protocol),
-             ncclPatternToString(f->pattern));
-    
-    // 分配通道数组
-    NCCLCHECK(ncclCalloc(&f->channels, f->nChannels));
-    for (int c = 0; c < f->nChannels; c++) {
-        f->channels[c].channelId = c;
-        f->channels[c].nSteps = 0;
-        f->channels[c].steps = NULL;
-    }
-    
-    *flow = f;
-    return ncclSuccess;
-}
-
-// Ring算法流生成
-ncclResult_t ncclGenerateRingFlow(struct ncclInfo* info, struct ncclCollectiveFlow* flow) {
-    struct ncclComm* comm = info->comm;
-    int nRanks = comm->nRanks;
-    int myRank = comm->rank;
-    
-    TRACE(NCCL_COLL, "Generating Ring flow for rank %d", myRank);
-    
-    // Ring算法的步骤数
-    int stepsPerLoop = info->nstepsPerLoop;  // 对于Ring，通常是 nRanks-1
-    int chunksPerLoop = info->nchunksPerLoop; // 对于Ring，通常是 nRanks
-    
-    // 计算每个通道的步骤
-    for (int c = 0; c < flow->nChannels; c++) {
-        struct ncclChannelFlow* channel = &flow->channels[c];
-        struct ncclRing* ring = &comm->channels[c].ring;
-        
-        // 估算步骤数 (简化版本，实际可能更复杂)
-        int nSteps = 0;
-        
-        if (info->pattern == ncclPatternRing) {
-            // AllGather/ReduceScatter: nRanks-1 步
-            nSteps = nRanks - 1;
-        } else if (info->pattern == ncclPatternRingTwice) {
-            // AllReduce: 2*(nRanks-1) 步 (reduce-scatter + allgather)
-            nSteps = 2 * (nRanks - 1);  
-        }
-        
-        channel->nSteps = nSteps;
-        if (nSteps > 0) {
-            NCCLCHECK(ncclCalloc(&channel->steps, nSteps));
-            
-            // 生成具体的通信步骤
-            for (int s = 0; s < nSteps; s++) {
-                struct ncclFlowStep* step = &channel->steps[s];
-                step->stepId = s;
-                step->channelId = c;
-                step->chunkId = s % chunksPerLoop;
-                
-                if (info->pattern == ncclPatternRingTwice) {
-                    if (s < nRanks - 1) {
-                        // Reduce-scatter 阶段
-                        step->opType = NCCL_FLOW_OP_SEND;
-                        step->dstRank = ring->next;
-                        step->srcRank = myRank;
-                        snprintf(step->description, sizeof(step->description), 
-                                "ReduceScatter step %d to rank %d", s, ring->next);
-                    } else {
-                        // AllGather 阶段  
-                        step->opType = NCCL_FLOW_OP_RECV;
-                        step->srcRank = ring->prev;
-                        step->dstRank = myRank;
-                        snprintf(step->description, sizeof(step->description),
-                                "AllGather step %d from rank %d", s - (nRanks - 1), ring->prev);
-                    }
-                } else {
-                    // 简单的Ring模式
-                    if (s % 2 == 0) {
-                        step->opType = NCCL_FLOW_OP_SEND;
-                        step->dstRank = ring->next;
-                        step->srcRank = myRank;
-                    } else {
-                        step->opType = NCCL_FLOW_OP_RECV;
-                        step->srcRank = ring->prev;  
-                        step->dstRank = myRank;
-                    }
-                    snprintf(step->description, sizeof(step->description),
-                            "Ring step %d", s);
-                }
-                
-                // 估算数据大小 (简化)
-                step->dataSize = info->nBytes / (nRanks * flow->nChannels);
-                step->dataOffset = s * step->dataSize;
-                step->estimatedTime = 100.0; // 简化的时间估算
-            }
-        }
-        
-        flow->totalSteps += nSteps;
-    }
-    
-    return ncclSuccess;
-}
-
-// Tree算法流生成
-ncclResult_t ncclGenerateTreeFlow(struct ncclInfo* info, struct ncclCollectiveFlow* flow) {
-    struct ncclComm* comm = info->comm;
-    int myRank = comm->rank;
-    
-    TRACE(NCCL_COLL, "Generating Tree flow for rank %d", myRank);
-    
-    // Tree算法的步骤相对简单
-    for (int c = 0; c < flow->nChannels; c++) {
-        struct ncclChannelFlow* channel = &flow->channels[c];
-        struct ncclTree* tree = &comm->channels[c].tree;
-        
-        int nSteps = 0;
-        
-        // 根据模式确定步骤数
-        if (info->pattern == ncclPatternTreeUp) {
-            nSteps = tree->depth; // 向上聚合
-        } else if (info->pattern == ncclPatternTreeDown) {
-            nSteps = tree->depth; // 向下广播
-        } else if (info->pattern == ncclPatternTreeUpDown) {
-            nSteps = 2 * tree->depth; // 先上后下
-        }
-        
-        channel->nSteps = nSteps;
-        if (nSteps > 0) {
-            NCCLCHECK(ncclCalloc(&channel->steps, nSteps));
-            
-            for (int s = 0; s < nSteps; s++) {
-                struct ncclFlowStep* step = &channel->steps[s];
-                step->stepId = s;
-                step->channelId = c;
-                step->chunkId = 0; // Tree通常不分块
-                
-                if (info->pattern == ncclPatternTreeUpDown && s >= tree->depth) {
-                    // Down阶段
-                    step->opType = NCCL_FLOW_OP_SEND;
-                    step->srcRank = myRank;
-                    // 简化：发给第一个down节点
-                    step->dstRank = (tree->down[0] != -1) ? tree->down[0] : myRank;
-                    snprintf(step->description, sizeof(step->description),
-                            "Tree down step %d", s - tree->depth);
-                } else {
-                    // Up阶段
-                    step->opType = NCCL_FLOW_OP_RECV;
-                    step->dstRank = myRank;
-                    step->srcRank = (tree->up != -1) ? tree->up : myRank;
-                    snprintf(step->description, sizeof(step->description),
-                            "Tree up step %d", s);
-                }
-                
-                step->dataSize = info->nBytes / flow->nChannels;
-                step->dataOffset = 0;
-                step->estimatedTime = 200.0; // Tree一般比Ring慢一些
-            }
-        }
-        
-        flow->totalSteps += nSteps;
-    }
-    
-    return ncclSuccess;
-}
-
-// CollNet算法流生成 (简化版本)
-ncclResult_t ncclGenerateCollNetFlow(struct ncclInfo* info, struct ncclCollectiveFlow* flow) {
-    TRACE(NCCL_COLL, "Generating CollNet flow (simplified)");
-    
-    // CollNet算法相对复杂，这里提供简化实现
-    for (int c = 0; c < flow->nChannels; c++) {
-        struct ncclChannelFlow* channel = &flow->channels[c];
-        
-        // CollNet通常步骤较少但吞吐更高
-        int nSteps = 2; // 简化：网络卡聚合 + 广播
-        channel->nSteps = nSteps;
-        NCCLCHECK(ncclCalloc(&channel->steps, nSteps));
-        
-        for (int s = 0; s < nSteps; s++) {
-            struct ncclFlowStep* step = &channel->steps[s];
-            step->stepId = s;
-            step->channelId = c;
-            step->chunkId = s;
-            
-            if (s == 0) {
-                step->opType = NCCL_FLOW_OP_SEND;
-                snprintf(step->description, sizeof(step->description), "CollNet aggregate");
-            } else {
-                step->opType = NCCL_FLOW_OP_RECV;
-                snprintf(step->description, sizeof(step->description), "CollNet broadcast");
-            }
-            
-            step->dataSize = info->nBytes / flow->nChannels;
-            step->dataOffset = s * step->dataSize;
-            step->estimatedTime = 50.0; // CollNet通常更快
-            step->srcRank = (s == 0) ? info->comm->rank : -1;
-            step->dstRank = (s == 1) ? info->comm->rank : -1;
-        }
-        
-        flow->totalSteps += nSteps;
-    }
-    
-    return ncclSuccess;
-}
-
-// 基于ncclInfo生成流信息
-extern "C" ncclResult_t ncclComputeFlowFromInfo(struct ncclInfo* info, struct ncclCollectiveFlow** flow) {
-    if (!flowExtractionEnabled) {
-        return ncclInternalError;
-    }
-    
-    NCCLCHECK(createBaseFlow(info, flow));
-    
-    // 根据算法类型生成具体的流步骤
-    switch (info->algorithm) {
-        case NCCL_ALGO_RING:
-            NCCLCHECK(ncclGenerateRingFlow(info, *flow));
-            break;
-        case NCCL_ALGO_TREE:
-            NCCLCHECK(ncclGenerateTreeFlow(info, *flow));
-            break;
-        case NCCL_ALGO_COLLNET_DIRECT:
-        case NCCL_ALGO_COLLNET_CHAIN:
-            NCCLCHECK(ncclGenerateCollNetFlow(info, *flow));
-            break;
-        case NCCL_ALGO_NVLS:
-        case NCCL_ALGO_NVLS_TREE:
-            // NVLS 暂时使用CollNet的简化版本
-            NCCLCHECK(ncclGenerateCollNetFlow(info, *flow));
-            break;
-        default:
-            WARN("Unsupported algorithm %d for flow extraction", info->algorithm);
-            return ncclInternalError;
-    }
-    
-    INFO(NCCL_COLL, "Generated flow: %d total steps", (*flow)->totalSteps);
-    
-    return ncclSuccess;
-}
-
-// 主API函数：获取集合通信流信息
-extern "C" ncclResult_t ncclGetCollectiveFlow(
-    ncclFunc_t collType,
-    size_t count,
-    ncclDataType_t dataType,
-    int root,
-    ncclComm_t comm,
-    struct ncclCollectiveFlow** flow) {
-    
-    if (!flowExtractionEnabled) {
-        WARN("Flow extraction is disabled");
-        return ncclInvalidArgument;
-    }
-    if (flow == NULL || comm == NULL) {
-        WARN("Invalid arguments to ncclGetCollectiveFlow");
-        return ncclInvalidArgument;
-    }
-    
-    // 构建ncclInfo结构
-    struct ncclInfo info = {};
-    info.coll = collType;
-    info.comm = comm;
-    info.count = count;
-    info.datatype = dataType;
-    info.root = root;
-    info.sendbuff = NULL; // 流信息提取不需要实际buffer
-    info.recvbuff = NULL;
-    info.stream = NULL;
-    info.chunkSteps = 1;
-    info.sliceSteps = 1;
-    
-    // 设置派生信息
-    NCCLCHECK(ncclInfoSetDerived(&info, comm->nRanks));
-    
-    // 复用NCCL的算法选择逻辑
-    int collNetSupport = 0;
-    (void)flowGetCollNetSupport(&info, &collNetSupport);
-    NCCLCHECK(flowGetAlgoInfo(&info, collNetSupport, 1));
-    
-    // 设置通信模式（复制 enqueue.cc:getPatternInfo 逻辑的结果）
-    switch (collType) {
-        case ncclFuncBroadcast:
-            info.pattern = info.algorithm == NCCL_ALGO_TREE ? ncclPatternTreeDown : ncclPatternPipelineFrom; break;
-        case ncclFuncReduce:
-            info.pattern = info.algorithm == NCCL_ALGO_TREE ? ncclPatternTreeUp : ncclPatternPipelineTo; break;
-        case ncclFuncReduceScatter:
-        case ncclFuncAllGather:
-            info.pattern = (info.algorithm == NCCL_ALGO_NVLS) ? ncclPatternNvls : ncclPatternRing; break;
-        case ncclFuncAllReduce:
-            info.pattern = (info.algorithm == NCCL_ALGO_NVLS) ? ncclPatternNvls :
-                           (info.algorithm == NCCL_ALGO_NVLS_TREE) ? ncclPatternNvlsTree :
-                           (info.algorithm == NCCL_ALGO_COLLNET_DIRECT) ? ncclPatternCollnetDirect :
-                           (info.algorithm == NCCL_ALGO_COLLNET_CHAIN) ? ncclPatternCollnetChain :
-                           (info.algorithm == NCCL_ALGO_TREE) ? ncclPatternTreeUpDown :
-                           ncclPatternRingTwice; break;
-        default:
-            WARN("Unsupported collective type %d", collType);
-            return ncclInvalidArgument;
-    }
-    
-    // 设置循环信息（复制 enqueue.cc:getLoopInfo 结果）
-    switch (info.pattern) {
-        case ncclPatternTreeUp:
-        case ncclPatternTreeDown:
-        case ncclPatternTreeUpDown:
-        case ncclPatternPipelineFrom:
-        case ncclPatternPipelineTo:
-        case ncclPatternCollnetChain:
-            info.nstepsPerLoop = info.nchunksPerLoop = 1; break;
-        case ncclPatternNvls:
-            info.nstepsPerLoop = 1; info.nchunksPerLoop = info.comm->channels[0].nvls.nHeads; break;
-        case ncclPatternCollnetDirect:
-            info.nstepsPerLoop = 1; info.nchunksPerLoop = info.comm->channels[0].collnetDirect.nHeads; break;
-        case ncclPatternRing:
-            info.nstepsPerLoop = info.comm->nRanks-1; info.nchunksPerLoop = info.comm->nRanks; break;
-        case ncclPatternRingTwice:
-            info.nstepsPerLoop = 2*(info.comm->nRanks-1); info.nchunksPerLoop = info.comm->nRanks; break;
-        case ncclPatternNvlsTree:
-            info.nstepsPerLoop = 1; info.nchunksPerLoop = info.comm->channels[0].nvls.nHeads; break;
-        default:
-            WARN("Unknown pattern %d", info.pattern);
-            return ncclInternalError;
-    }
-    
-    // 生成流信息
-    NCCLCHECK(ncclComputeFlowFromInfo(&info, flow));
-    return ncclSuccess;
-}
-
-// 释放流信息内存
-extern "C" ncclResult_t ncclFreeCollectiveFlow(struct ncclCollectiveFlow* flow) {
-    if (flow == NULL) return ncclSuccess;
-    
-    // 释放各通道的步骤数组
-    if (flow->channels) {
-        for (int c = 0; c < flow->nChannels; c++) {
-            if (flow->channels[c].steps) {
-                free(flow->channels[c].steps);
-            }
-        }
-        free(flow->channels);
-    }
-    
-    // 释放主结构
-    free(flow);
-    
-    return ncclSuccess;
-}
-
-// JSON格式输出 (简化版本)
-extern "C" ncclResult_t ncclFlowToJson(struct ncclCollectiveFlow* flow, char** jsonStr) {
-    if (flow == NULL || jsonStr == NULL) {
-        return ncclInvalidArgument;
-    }
-    
-    // 估算JSON大小
-    size_t estimated_size = 4096 + flow->totalSteps * 512;
-    char* json = (char*)malloc(estimated_size);
-    if (json == NULL) {
-        return ncclSystemError;
-    }
-    
-    int pos = 0;
-    pos += snprintf(json + pos, estimated_size - pos,
-        "{\n"
-        "  \"collective_type\": \"%s\",\n"
-        "  \"algorithm\": \"%s\",\n" 
-        "  \"protocol\": \"%s\",\n"
-        "  \"pattern\": \"%s\",\n"
-        "  \"my_rank\": %d,\n"
-        "  \"total_ranks\": %d,\n"
-        "  \"total_steps\": %d,\n"
-        "  \"total_channels\": %d,\n"
-        "  \"total_bytes\": %zu,\n"
-        "  \"topology_summary\": \"%s\",\n"
-        "  \"channels\": [\n",
-        ncclFuncStr[flow->collType],
-        ncclAlgorithmToString(flow->algorithm),
-        ncclProtocolToString(flow->protocol), 
-        ncclPatternToString(flow->pattern),
-        flow->myRank,
-        flow->nRanks,
-        flow->totalSteps,
-        flow->nChannels,
-        flow->totalBytes,
-        flow->topoInfo);
-        
-    // 输出各通道信息
-    for (int c = 0; c < flow->nChannels; c++) {
-        struct ncclChannelFlow* channel = &flow->channels[c];
-        pos += snprintf(json + pos, estimated_size - pos,
-            "    {\n"
-            "      \"channel_id\": %d,\n"
-            "      \"steps\": [\n", channel->channelId);
-            
-        for (int s = 0; s < channel->nSteps; s++) {
-            struct ncclFlowStep* step = &channel->steps[s];
-            pos += snprintf(json + pos, estimated_size - pos,
-                "        {\n"
-                "          \"step_id\": %d,\n"
-                "          \"operation\": \"%s\",\n"
-                "          \"src_rank\": %d,\n"
-                "          \"dst_rank\": %d,\n"
-                "          \"data_size\": %zu,\n"
-                "          \"data_offset\": %zu,\n"
-                "          \"channel_id\": %d,\n"
-                "          \"chunk_id\": %d,\n"
-                "          \"description\": \"%s\"\n"
-                "        }%s\n",
-                step->stepId,
-                ncclFlowOpTypeToString(step->opType),
-                step->srcRank,
-                step->dstRank,
-                step->dataSize,
-                step->dataOffset,
-                step->channelId,
-                step->chunkId,
-                step->description,
-                (s < channel->nSteps - 1) ? "," : "");
-        }
-        
-        pos += snprintf(json + pos, estimated_size - pos,
-            "      ]\n"
-            "    }%s\n", (c < flow->nChannels - 1) ? "," : "");
-    }
-    
-    pos += snprintf(json + pos, estimated_size - pos, "  ]\n}\n");
-    
-    *jsonStr = json;
-    return ncclSuccess;
-}
-
-// XML格式输出 (简化版本)
-extern "C" ncclResult_t ncclFlowToXml(struct ncclCollectiveFlow* flow, char** xmlStr) {
-    // 为简化，暂时返回未实现
-    if (xmlStr) *xmlStr = NULL;
-    return ncclInternalError;
-}
+// 删除/禁用：模式化flow相关实现（保留字符串转换与权威提取路径）
+// - createBaseFlow
+// - ncclGenerateRingFlow
+// - ncclGenerateTreeFlow
+// - ncclGenerateCollNetFlow
+// - ncclComputeFlowFromInfo
+// - ncclGetCollectiveFlow
+// - ncclFreeCollectiveFlow
+// - ncclFlowToJson / ncclFlowToXml
+// 上述函数已移除，避免复制/简化 NCCL 逻辑对仿真产生误导
 
 // 记录：从真实proxyOp记录一条流信息到按opCount聚合的文件
 extern "C" ncclResult_t ncclRecordProxyOp(const struct ncclInfo* info,
@@ -750,4 +305,37 @@ extern "C" ncclResult_t ncclWriteAggregatedFlow(struct ncclComm* comm) {
     fclose(fpp);
     fclose(fo);
     return ncclSuccess;
+} 
+
+extern "C" ncclResult_t ncclExtractFlow(
+    ncclFunc_t collType,
+    size_t count,
+    ncclDataType_t dataType,
+    int root,
+    ncclComm_t comm) {
+    if (!flowExtractionEnabled) return ncclInvalidArgument;
+    if (comm == NULL) return ncclInvalidArgument;
+
+    ncclResult_t res = ncclSuccess;
+    switch (collType) {
+      case ncclFuncAllReduce:
+        res = ncclAllReduce(NULL, NULL, count, dataType, ncclSum, comm, (cudaStream_t)0);
+        break;
+      case ncclFuncAllGather:
+        res = ncclAllGather(NULL, NULL, count, dataType, comm, (cudaStream_t)0);
+        break;
+      case ncclFuncReduceScatter:
+        res = ncclReduceScatter(NULL, NULL, count, dataType, ncclSum, comm, (cudaStream_t)0);
+        break;
+      case ncclFuncBroadcast:
+        res = ncclBroadcast(NULL, NULL, count, dataType, root, comm, (cudaStream_t)0);
+        break;
+      case ncclFuncReduce:
+        res = ncclReduce(NULL, NULL, count, dataType, ncclSum, root, comm, (cudaStream_t)0);
+        break;
+      default:
+        return ncclInvalidArgument;
+    }
+    if (res != ncclSuccess) return res;
+    return ncclWriteAggregatedFlow(comm);
 } 

@@ -74,31 +74,15 @@ struct ncclCollectiveFlow {
 };
 
 // 主要API函数
-NCCL_EXPORT ncclResult_t ncclGetCollectiveFlow(
-    ncclFunc_t collType,
-    size_t count,
-    ncclDataType_t dataType,
-    int root,
-    ncclComm_t comm,
-    struct ncclCollectiveFlow** flow
-);
 
-NCCL_EXPORT ncclResult_t ncclFreeCollectiveFlow(struct ncclCollectiveFlow* flow);
-NCCL_EXPORT ncclResult_t ncclFlowToJson(struct ncclCollectiveFlow* flow, char** jsonStr);
-NCCL_EXPORT ncclResult_t ncclFlowToXml(struct ncclCollectiveFlow* flow, char** xmlStr);
 NCCL_EXPORT ncclResult_t ncclSetFlowExtractionEnabled(int enable);
-
-// 获取算法和协议的字符串名称 (辅助函数)
+  
+  // 获取算法和协议的字符串名称 (辅助函数)
 NCCL_EXPORT const char* ncclAlgorithmToString(int algorithm);
 NCCL_EXPORT const char* ncclProtocolToString(int protocol);
 NCCL_EXPORT const char* ncclPatternToString(ncclPattern_t pattern);
 NCCL_EXPORT const char* ncclFlowOpTypeToString(ncclFlowOpType_t opType);
 
-// 内部辅助函数 (不对外暴露)
-ncclResult_t ncclComputeFlowFromInfo(struct ncclInfo* info, struct ncclCollectiveFlow** flow);
-NCCL_EXPORT ncclResult_t ncclGenerateRingFlow(struct ncclInfo* info, struct ncclCollectiveFlow* flow);
-NCCL_EXPORT ncclResult_t ncclGenerateTreeFlow(struct ncclInfo* info, struct ncclCollectiveFlow* flow);
-NCCL_EXPORT ncclResult_t ncclGenerateCollNetFlow(struct ncclInfo* info, struct ncclCollectiveFlow* flow);
 
 // 记录：从NCCL的proxyOp与info直接生成并落盘流信息（仅当启用时生效）
 NCCL_EXPORT ncclResult_t ncclRecordProxyOp(const struct ncclInfo* info,
@@ -107,6 +91,15 @@ NCCL_EXPORT ncclResult_t ncclRecordProxyOp(const struct ncclInfo* info,
 
 // 聚合：将 flow_steps_rank<rank>.jsonl 与 proxy_flow_rank<rank>.jsonl 聚合输出 flow_rank<rank>.json
 NCCL_EXPORT ncclResult_t ncclWriteAggregatedFlow(struct ncclComm* comm);
+
+// 权威提取：直接调用真实NCCL集合通信以触发proxy记录，然后写出聚合文件
+// 不复制选择/规划逻辑，最大限度复用NCCL内部实现
+NCCL_EXPORT ncclResult_t ncclExtractFlow(
+    ncclFunc_t collType,
+    size_t count,
+    ncclDataType_t dataType,
+    int root,
+    ncclComm_t comm);
 
 #ifdef __cplusplus
 }
