@@ -11,6 +11,8 @@
 #include "bootstrap.h"
 #include "channel.h"
 #include "cudawrap.h"
+#include "include/proxy.h"
+#include "flow_extractor.h"
 
 #include <cstring> // std::memcpy
 #include <cinttypes> // PRIx64
@@ -256,6 +258,15 @@ static ncclResult_t addProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelP
     struct ncclProxyOp* q = ncclMemoryPoolAlloc<struct ncclProxyOp>(&comm->memPool_ncclProxyOp, &comm->memPermanent);
     *q = *op; // C++ struct assignment
     ncclIntruQueueEnqueue(&plan->channels[op->channelId].proxyOpQueue, q);
+    // 记录实际入队的 proxyOp
+    struct ncclInfo infoCtx = {};
+    infoCtx.comm = comm;
+    (void)ncclRecordProxyOp(&infoCtx, q, comm);
+  } else {
+    // 即便不需要proxy，也记录当前推导的op作为"非代理"步骤
+    struct ncclInfo infoCtx = {};
+    infoCtx.comm = comm;
+    (void)ncclRecordProxyOp(&infoCtx, op, comm);
   }
   return ncclSuccess;
 }
