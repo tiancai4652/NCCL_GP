@@ -250,6 +250,67 @@ extern "C" ncclResult_t ncclRecordProxyOp(const struct ncclInfo* info,
     return ncclSuccess;
 } 
 
+// 新增：逐 peer 的步级记录（Tree/CollNet/NVLS/Pipeline/Ring 均可使用）
+extern "C" ncclResult_t ncclRecordProxyPeerSteps(struct ncclComm* comm,
+                                                  int channelId,
+                                                  int type,
+                                                  int peer,
+                                                  const struct ncclProxyOp* op) {
+  if (!flowExtractionEnabled) return ncclSuccess;
+  if (comm == nullptr || op == nullptr) return ncclInvalidArgument;
+  if (peer < 0) return ncclSuccess;
+
+  char outDir[256];
+  getOutputDir(outDir, sizeof(outDir));
+  ensureDir(outDir);
+
+  char stepsPath[512];
+  snprintf(stepsPath, sizeof(stepsPath), "%s/flow_steps_rank%d.jsonl", outDir, comm->rank);
+  FILE* fps = fopen(stepsPath, "a");
+  if (!fps) return ncclSystemError;
+
+  // 操作方向
+  const char* opStr = (type == 0) ? "RECV" : "SEND"; // 0=RECV,1=SEND
+  const char* pattern = ncclPatternToString((ncclPattern_t)op->pattern);
+  const char* proto = ncclProtocolToString(op->protocol);
+
+  // 阶段语义标签
+  const char* stage = "generic";
+  switch ((ncclPattern_t)op->pattern) {
+    case ncclPatternRing: stage = "ring"; break;
+    case ncclPatternRingTwice: /* 按半程拆分 */ stage = nullptr; break;
+    case ncclPatternPipelineFrom: stage = "pipeline-from"; break;
+    case ncclPatternPipelineTo: stage = "pipeline-to"; break;
+    case ncclPatternTreeUp: stage = "tree-up"; break;
+    case ncclPatternTreeDown: stage = "tree-down"; break;
+    case ncclPatternTreeUpDown: /* 按半程拆分 */ stage = nullptr; break;
+    case ncclPatternCollnetChain: stage = "collnet-chain"; break;
+    case ncclPatternCollnetDirect: stage = "collnet-direct"; break;
+    case ncclPatternNvls: stage = "nvls"; break;
+    case ncclPatternNvlsTree: stage = "nvls-tree"; break;
+    default: stage = "generic"; break;
+  }
+
+  for (int s = 0; s < op->nsteps; ++s) {
+    const char* curStage = stage;
+    if (stage == nullptr) {
+      // RingTwice / TreeUpDown：前半与后半阶段标签不同
+      int half = op->nsteps/2;
+      if ((ncclPattern_t)op->pattern == ncclPatternRingTwice) {
+        curStage = (s < half) ? "reduce-scatter" : "allgather";
+      } else if ((ncclPattern_t)op->pattern == ncclPatternTreeUpDown) {
+        curStage = (s < half) ? "tree-up" : "tree-down";
+      }
+    }
+    fprintf(fps,
+      "{\"opCount\":%lu,\"rank\":%d,\"channel\":%d,\"step\":%d,\"op\":\"%s\",\"peer\":%d,\"bytes\":%zd,\"pattern\":\"%s\",\"protocol\":\"%s\",\"stage\":\"%s\"}\n",
+      op->opCount, comm->rank, channelId, s, opStr, peer, op->nbytes, pattern, proto, curStage ? curStage : "generic");
+  }
+
+  fclose(fps);
+  return ncclSuccess;
+}
+
 extern "C" ncclResult_t ncclWriteAggregatedFlow(struct ncclComm* comm) {
     if (comm == nullptr) return ncclInvalidArgument;
     char outDir[256];

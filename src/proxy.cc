@@ -12,6 +12,7 @@
 #include "profiler.h"
 #define ENABLE_TIMER 0
 #include "timer.h"
+#include "flow_extractor.h"
 
 #include <sys/syscall.h>
 #include <assert.h>
@@ -514,6 +515,12 @@ static ncclResult_t SaveProxy(struct ncclComm* comm, struct ncclChannel* channel
   if (justInquire) *justInquire = true;
   else {
     NCCLCHECK(ncclLocalOpAppend(comm, &connector->proxyConn, op));
+    // 记录逐步流（SEND/RECV），以步级展开，不依赖设备端
+    extern ncclResult_t ncclRecordProxyOp(const struct ncclInfo*, const struct ncclProxyOp*, struct ncclComm*);
+    (void)ncclRecordProxyOp(nullptr, op, comm); // 可选：也可仅用于触发确保文件存在
+    // 兼容：用我们新增的逐步记录函数
+    extern ncclResult_t ncclRecordProxyPeerSteps(struct ncclComm*, int channelId, int type, int peer, const struct ncclProxyOp*);
+    (void)ncclRecordProxyPeerSteps(comm, channel->id, type, peer, op);
   }
   return ncclSuccess;
 }
@@ -1093,7 +1100,7 @@ error:
   return ret;
 }
 
-const char* ncclProxyMsgTypeStr[] = { "Unknown", "Init", "SharedInit", "Setup", "Connect", "Start", "Close", "Abort", "Stop", "ConvertFd" };
+const char* ncclProxyMsgTypeStr[] = { "Unknown", "Init", "SharedInit", "Setup", "Connect", "Close", "Abort", "Stop", "ConvertFd" };
 ncclResult_t ncclProxyCallAsync(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, int type, void* reqBuff, int reqSize, int respSize, void* opId) {
   struct ncclSocket* sock;
   ncclResult_t ret = ncclSuccess;

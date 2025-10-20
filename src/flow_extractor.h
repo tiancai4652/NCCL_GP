@@ -92,6 +92,13 @@ NCCL_EXPORT ncclResult_t ncclRecordProxyOp(const struct ncclInfo* info,
 // 聚合：将 flow_steps_rank<rank>.jsonl 与 proxy_flow_rank<rank>.jsonl 聚合输出 flow_rank<rank>.json
 NCCL_EXPORT ncclResult_t ncclWriteAggregatedFlow(struct ncclComm* comm);
 
+// 逐步记录：按给定 peer 和方向（type: 0=RECV,1=SEND）输出每步一条
+NCCL_EXPORT ncclResult_t ncclRecordProxyPeerSteps(struct ncclComm* comm,
+                                                 int channelId,
+                                                 int type,
+                                                 int peer,
+                                                 const struct ncclProxyOp* op);
+
 // 权威提取：直接调用真实NCCL集合通信以触发proxy记录，然后写出聚合文件
 // 不复制选择/规划逻辑，最大限度复用NCCL内部实现
 NCCL_EXPORT ncclResult_t ncclExtractFlow(

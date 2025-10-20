@@ -12,6 +12,8 @@
 - 关键修改
   - `src/enqueue.cc`
     - 在 `addProxyOpIfNeeded` 中，当 proxy 确认需要入队时，调用 `ncclRecordProxyOp(...)` 记录真实 `ncclProxyOp`（仅在真实入队时记录，已去重）。
+  - `src/proxy.cc`
+    - 在 `SaveProxy` 路径插桩，调用 `ncclRecordProxyPeerSteps(...)` 对逐 peer 的 SEND/RECV 步骤进行记录，已覆盖 Ring/RingTwice、Pipeline(From/To)、Tree(Up/Down/UpDown)、CollNet(Chain/Direct)、NVLS/NVLS_TREE 等模式的阶段标签与对端。
   - `src/Makefile`：确保 `flow_extractor.cc` 编译进 `libnccl.so`。
   - `test/Makefile`：编译 `test_flow_extractor.cpp`。
 - 导出 API（`src/flow_extractor.h`）
@@ -19,6 +21,7 @@
   - `ncclRecordProxyOp(...)`: 由 `enqueue.cc` 在真实 proxy 入队时自动调用（用户无需手动调）
   - `ncclWriteAggregatedFlow(ncclComm* comm)`: 聚合当前 rank 的记录，输出单文件视图
   - `ncclExtractFlow(collType, count, dataType, root, comm)`: 权威提取接口（直接调用 NCCL 集合通信触发完整链路后聚合输出）
+  - 说明：`ncclRecordProxyPeerSteps(...)` 为内部记录函数（由 `proxy.cc` 调用），一般无需在业务代码中显式调用。
 
 已移除：`ncclGetCollectiveFlow`/`ncclFlowToJson` 等所有“模式化/估算式”接口与实现。
 
@@ -46,7 +49,7 @@ export NCCL_DEBUG=WARN
 ./test_flow_extractor
 ```
 
-执行完成后，输出位于：`output/<topo_base>/`，例如 `output/nvlink_5GPU/`。
+执行完成后，输出位于当前运行目录的 `output/<topo_base>/`，例如 `output/nvlink_5GPU/`。
 
 ## 4. 输出文件与含义
 
@@ -55,7 +58,12 @@ export NCCL_DEBUG=WARN
   - 字段全部来源于 NCCL 的真实 `ncclProxyOp` 与通道拓扑。
 - `flow_steps_rank<rank>.jsonl`（逐步展开，直接可用于仿真）：
   - 每步两条（SEND/RECV）；字段：`opCount, rank, channel, step, op, peer, bytes, pattern, protocol, stage`
-  - `peer` 与阶段根据 pattern 与通道 ring/tree 机械展开，保持与 NCCL 规划一致。
+  - `peer` 与 `stage` 已覆盖以下模式：
+    - Ring、RingTwice（环前后半程标记为 `reduce-scatter`/`allgather`）
+    - PipelineFrom/PipelineTo（标记为 `pipeline-from`/`pipeline-to`）
+    - TreeUp/TreeDown/TreeUpDown（标记为 `tree-up`/`tree-down`）
+    - CollNetChain/CollNetDirect（标记为 `collnet-chain`/`collnet-direct`）
+    - NVLS、NVLS_TREE（标记为 `nvls`/`nvls-tree`）
 - `flow_rank<rank>.json`（聚合视图）：
   - `rank`、`meta`（来自 proxy 摘要第一条）、`steps`（完整逐步列表）
 
@@ -85,16 +93,19 @@ export NCCL_DEBUG=WARN
 
 - 算法/协议/模式、通道与邻居、`ncclProxyOp` 字段（nsteps/chunk/slice/nbytes/dtype/redOp/pattern/protocol）全部来自 NCCL 真实执行路径。
 - 我们不做时间或数据量估算；只负责记录/展开/聚合。
+- 逐步对端与阶段标签现已覆盖：Ring/RingTwice、PipelineFrom/To、TreeUp/Down/UpDown、CollNetChain/Direct、NVLS/NVLS_TREE。
 - 极个别协议/拓扑若无需 proxy，可能不生成 `proxy_flow_*` 与 `flow_steps_*`；此时仍可通过再次触发其它集合通信获取其它流记录。
 
 ## 7. 常见问题
 
 - 段错误/启动失败：确认 `NCCL_TOPO_FILE`、`LD_LIBRARY_PATH`、`GPU_DEV_NUM` 设置正确。
 - 无输出文件：需要至少一次真实的 NCCL 集合通信以触发 proxy 入队（`test_flow_extractor` 已自动调用一次 AllReduce）。
+- 输出路径：相对于运行目录创建 `output/<topo_base>/`；如需固定到项目根，可在根目录运行或调整实现。
 
 ## 8. 目录与文件（本次新增/修改关注）
 
 - `src/flow_extractor.h/.cc`（新增，记录+聚合+权威提取）
 - `src/enqueue.cc`（插桩：真实入队记录）
+- `src/proxy.cc`（插桩：逐 peer 步级记录）
 - `test/test_flow_extractor.cpp`（最小触发 + 聚合）
 - 输出：`output/<topo_base>/proxy_flow_rank*.jsonl`、`flow_steps_rank*.jsonl`、`flow_rank*.json` 
