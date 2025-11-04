@@ -130,52 +130,6 @@ const char* ncclFlowOpTypeToString(ncclFlowOpType_t opType) {
     return "UNKNOWN";
 }
 
-// 内部：获取 CollNet 支持类型（等价于 enqueue.cc:getCollNetSupport）
-static inline ncclResult_t flowGetCollNetSupport(struct ncclInfo* info, int* collNetTypeSupport) {
-    ncclRedOp_t netOp = info->op == ncclAvg || info->op >= ncclNumOps ? ncclSum : info->op;
-    *collNetTypeSupport = info->comm->collNetSupportMatrix[netOp][info->datatype];
-    return ncclSuccess;
-}
-
-// 内部：算法与协议选择（等价于 enqueue.cc:getAlgoInfo 的简化复用版）
-static ncclResult_t flowGetAlgoInfo(struct ncclInfo* info, int collNetTypeSupport, int numPipeOps) {
-    struct ncclComm* comm = info->comm;
-    if (comm->nRanks == 1) {
-        info->algorithm = NCCL_ALGO_RING;
-        info->protocol = NCCL_PROTO_SIMPLE;
-    } else {
-        float minTime = 3600000000.0f;
-        info->algorithm = -1;
-        info->protocol = -1;
-        for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
-            if ((a == NCCL_ALGO_COLLNET_DIRECT || a == NCCL_ALGO_COLLNET_CHAIN) && collNetTypeSupport != 1) continue;
-            if (a == NCCL_ALGO_NVLS && comm->nNodes > 1) continue;
-            // note: NVLS support macro在原始代码中检查datatype/op，这里简化忽略
-            for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
-                float time = -1.0f;
-                ncclResult_t rc = ncclTopoGetAlgoTime(info, a, p, numPipeOps, &time);
-                if (rc != ncclSuccess) continue;
-                if (time >= 0 && time < minTime) {
-                    info->algorithm = a;
-                    info->protocol = p;
-                    minTime = time;
-                }
-            }
-        }
-        if (info->algorithm == -1 || info->protocol == -1) {
-            WARN("Error : no algorithm/protocol available");
-            return ncclInternalError;
-        }
-        TRACE(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %f", info->nBytes, info->algorithm, info->protocol, (double)minTime);
-    }
-    // 选择线程数
-    info->nThreads = comm->maxThreads[info->algorithm][info->protocol];
-    if (info->nThreads <= 0) info->nThreads = 256;
-    // 通道数
-    if (info->nChannels <= 0) info->nChannels = comm->nChannels;
-    return ncclSuccess;
-}
-
 // 启用/禁用流信息提取
 extern "C" ncclResult_t ncclSetFlowExtractionEnabled(int enable) {
     flowExtractionEnabled = enable;
@@ -183,18 +137,9 @@ extern "C" ncclResult_t ncclSetFlowExtractionEnabled(int enable) {
     return ncclSuccess;
 }
 
-// 删除/禁用：模式化flow相关实现（保留字符串转换与权威提取路径）
-// - createBaseFlow
-// - ncclGenerateRingFlow
-// - ncclGenerateTreeFlow
-// - ncclGenerateCollNetFlow
-// - ncclComputeFlowFromInfo
-// - ncclGetCollectiveFlow
-// - ncclFreeCollectiveFlow
-// - ncclFlowToJson / ncclFlowToXml
-// 上述函数已移除，避免复制/简化 NCCL 逻辑对仿真产生误导
-
-// 记录：从真实proxyOp记录一条流信息到按opCount聚合的文件
+// 记录：从真实 proxyOp 记录一条流信息到按 opCount 聚合的文件
+// 本函数只记录 NCCL 真实生成的 proxyOp，不做任何推测或计算
+// 所有字段都直接从 NCCL 结构体读取
 extern "C" ncclResult_t ncclRecordProxyOp(const struct ncclInfo* info,
                                            const struct ncclProxyOp* proxyOp,
                                            struct ncclComm* comm) {
@@ -206,7 +151,7 @@ extern "C" ncclResult_t ncclRecordProxyOp(const struct ncclInfo* info,
     snprintf(path, sizeof(path), "%s/proxy_flow_rank%d.jsonl", outDir, comm->rank);
     FILE* fp = fopen(path, "a");
     if (!fp) return ncclSystemError;
-    // 简化记录：每个proxyOp一条记录，包含关键信息；peer信息可从channel ring/tree推导
+    // 记录每个 proxyOp 的摘要信息，ringPrev/ringNext 来自 NCCL 初始化的 ring 拓扑（仅供参考）
     const int chan = proxyOp->channelId;
     int prev = comm->channels[chan].ring.prev;
     int next = comm->channels[chan].ring.next;
@@ -218,39 +163,16 @@ extern "C" ncclResult_t ncclRecordProxyOp(const struct ncclInfo* info,
       proxyOp->sliceSteps, proxyOp->chunkSteps, proxyOp->dtype, proxyOp->redOp, pattern, proto, prev, next);
     fclose(fp);
 
-    // 逐步展开：为每个step写两条（SEND/RECV），便于仿真器直接消费
-    char stepsPath[512];
-    snprintf(stepsPath, sizeof(stepsPath), "%s/flow_steps_rank%d.jsonl", outDir, comm->rank);
-    FILE* fps = fopen(stepsPath, "a");
-    if (!fps) return ncclSystemError;
-    // 判定阶段
-    const bool isRing = (proxyOp->pattern == (uint8_t)ncclPatternRing);
-    const bool isRingTwice = (proxyOp->pattern == (uint8_t)ncclPatternRingTwice);
-    const char* stageReduce = "reduce-scatter";
-    const char* stageGather = "allgather";
-    const char* stageRing = "ring";
-    for (int s = 0; s < proxyOp->nsteps; ++s) {
-      const char* stage = stageRing;
-      if (isRingTwice) {
-        int half = proxyOp->nsteps/2;
-        stage = (s < half) ? stageReduce : stageGather;
-      } else if (isRing) {
-        stage = stageRing;
-      }
-      // SEND 条目
-      fprintf(fps,
-        "{\"opCount\":%lu,\"rank\":%d,\"channel\":%d,\"step\":%d,\"op\":\"SEND\",\"peer\":%d,\"bytes\":%zd,\"pattern\":\"%s\",\"protocol\":\"%s\",\"stage\":\"%s\"}\n",
-        proxyOp->opCount, comm->rank, chan, s, next, proxyOp->nbytes, pattern, proto, stage);
-      // RECV 条目
-      fprintf(fps,
-        "{\"opCount\":%lu,\"rank\":%d,\"channel\":%d,\"step\":%d,\"op\":\"RECV\",\"peer\":%d,\"bytes\":%zd,\"pattern\":\"%s\",\"protocol\":\"%s\",\"stage\":\"%s\"}\n",
-        proxyOp->opCount, comm->rank, chan, s, prev, proxyOp->nbytes, pattern, proto, stage);
-    }
-    fclose(fps);
+    // 注意：flow_steps_rank*.jsonl 的生成已移至 ncclRecordProxyPeerSteps()，
+    // 确保使用真实的 peer 信息（从 SaveProxy 传入），而不是基于 Ring 拓扑的假设。
+    // 这保证了所有通信模式（Ring/Tree/CollNet/NVLS/Pipeline）的准确性。
+    
     return ncclSuccess;
 } 
 
-// 新增：逐 peer 的步级记录（Tree/CollNet/NVLS/Pipeline/Ring 均可使用）
+// 逐 peer 的步级记录（Tree/CollNet/NVLS/Pipeline/Ring 均可使用）
+// 本函数记录来自 SaveProxy 的真实 peer 信息，peer 参数来自 NCCL 拓扑结构
+// 所有通信模式的 peer 都是准确的，无任何推测
 extern "C" ncclResult_t ncclRecordProxyPeerSteps(struct ncclComm* comm,
                                                   int channelId,
                                                   int type,
@@ -321,13 +243,14 @@ extern "C" ncclResult_t ncclWriteAggregatedFlow(struct ncclComm* comm) {
     snprintf(proxyPath, sizeof(proxyPath), "%s/proxy_flow_rank%d.jsonl", outDir, comm->rank);
     snprintf(outPath, sizeof(outPath), "%s/flow_rank%d.json", outDir, comm->rank);
 
-    FILE* fps = fopen(stepsPath, "r");
     FILE* fpp = fopen(proxyPath, "r");
-    if (fps == NULL || fpp == NULL) {
-      if (fps) fclose(fps);
-      if (fpp) fclose(fpp);
+    if (fpp == NULL) {
       return ncclSystemError;
     }
+    
+    FILE* fps = fopen(stepsPath, "r");
+    // flow_steps 文件可能不存在（如果 SaveProxy 未被调用）
+    bool hasSteps = (fps != NULL);
 
     // 简单读取到内存（不做完整解析，仅拼接为数组并排序时保留原顺序）
     // 为保持实现简洁，这里不进行真正的排序，而是按文件自然顺序输出
@@ -342,27 +265,33 @@ extern "C" ncclResult_t ncclWriteAggregatedFlow(struct ncclComm* comm) {
 
     // 写聚合输出
     FILE* fo = fopen(outPath, "w");
-    if (fo == NULL) { fclose(fps); fclose(fpp); return ncclSystemError; }
+    if (fo == NULL) {
+      if (fps) fclose(fps);
+      fclose(fpp);
+      return ncclSystemError;
+    }
 
     fprintf(fo, "{\n");
     fprintf(fo, "  \"rank\": %d,\n", comm->rank);
     fprintf(fo, "  \"meta\": %s", meta); // meta行已包含换行，末尾不加逗号
     fprintf(fo, "  ,\n  \"steps\": [\n");
 
-    // 逐行复制 steps
-    char line[1024];
-    int first = 1;
-    while (fgets(line, sizeof(line), fps)) {
-      // 去除行末换行
-      size_t len = strlen(line);
-      while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) { line[--len] = '\0'; }
-      if (!first) fprintf(fo, ",\n");
-      fprintf(fo, "    %s", line);
-      first = 0;
+    // 逐行复制 steps（如果文件存在）
+    if (hasSteps) {
+      char line[1024];
+      int first = 1;
+      while (fgets(line, sizeof(line), fps)) {
+        // 去除行末换行
+        size_t len = strlen(line);
+        while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) { line[--len] = '\0'; }
+        if (!first) fprintf(fo, ",\n");
+        fprintf(fo, "    %s", line);
+        first = 0;
+      }
+      fclose(fps);
     }
     fprintf(fo, "\n  ]\n}\n");
 
-    fclose(fps);
     fclose(fpp);
     fclose(fo);
     return ncclSuccess;

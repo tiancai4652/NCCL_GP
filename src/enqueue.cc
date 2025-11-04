@@ -258,12 +258,15 @@ static ncclResult_t addProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelP
     struct ncclProxyOp* q = ncclMemoryPoolAlloc<struct ncclProxyOp>(&comm->memPool_ncclProxyOp, &comm->memPermanent);
     *q = *op; // C++ struct assignment
     ncclIntruQueueEnqueue(&plan->channels[op->channelId].proxyOpQueue, q);
-    // 记录实际入队的 proxyOp
+    // 记录需要 proxy 的操作（会实际入队到 proxy 队列）
     struct ncclInfo infoCtx = {};
     infoCtx.comm = comm;
     (void)ncclRecordProxyOp(&infoCtx, q, comm);
+    // 注意：ncclProxySaveOp(EXECUTE模式) 会在后续的 enqueue 阶段被调用（line ~868）
+    // 在那里会调用 SaveProxy 并记录 flow_steps，所以这里不需要重复调用
   } else {
-    // 即便不需要proxy，也记录当前推导的op作为"非代理"步骤
+    // 记录不需要 proxy 的操作（NCCL 判定为本地操作或无需 proxy 线程）
+    // 注意：op 仍然是 NCCL 真实生成的，不是推导或估算的
     struct ncclInfo infoCtx = {};
     infoCtx.comm = comm;
     (void)ncclRecordProxyOp(&infoCtx, op, comm);

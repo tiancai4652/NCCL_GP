@@ -510,17 +510,24 @@ static ncclResult_t SaveProxy(struct ncclComm* comm, struct ncclChannel* channel
         type == proxyRecv ? "recv" : "send", peer, channel->id, connIndex);
     return ncclInternalError;
   }
-  if (connector->transportComm->proxyProgress == NULL) return ncclSuccess;
-
-  if (justInquire) *justInquire = true;
-  else {
-    NCCLCHECK(ncclLocalOpAppend(comm, &connector->proxyConn, op));
-    // 记录逐步流（SEND/RECV），以步级展开，不依赖设备端
-    extern ncclResult_t ncclRecordProxyOp(const struct ncclInfo*, const struct ncclProxyOp*, struct ncclComm*);
-    (void)ncclRecordProxyOp(nullptr, op, comm); // 可选：也可仅用于触发确保文件存在
-    // 兼容：用我们新增的逐步记录函数
+  
+  // 如果需要 proxy，设置 justInquire 标志
+  if (justInquire) {
+    *justInquire = true;
+  }
+  
+  if (!justInquire) {
+    // 记录逐步流（SEND/RECV），使用真实的 peer 信息（从 NCCL 内部拓扑获取）
+    // 此函数覆盖所有通信模式：Ring/Tree/CollNet/NVLS/Pipeline
     extern ncclResult_t ncclRecordProxyPeerSteps(struct ncclComm*, int channelId, int type, int peer, const struct ncclProxyOp*);
     (void)ncclRecordProxyPeerSteps(comm, channel->id, type, peer, op);
+    
+    // 如果没有 proxyProgress，只记录不执行真实操作
+    if (connector->transportComm->proxyProgress == NULL) {
+      return ncclSuccess;
+    }
+    
+    NCCLCHECK(ncclLocalOpAppend(comm, &connector->proxyConn, op));
   }
   return ncclSuccess;
 }

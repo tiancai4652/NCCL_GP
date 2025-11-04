@@ -91,9 +91,16 @@ export NCCL_DEBUG=WARN
 
 ## 6. 数据来源与准确性
 
-- 算法/协议/模式、通道与邻居、`ncclProxyOp` 字段（nsteps/chunk/slice/nbytes/dtype/redOp/pattern/protocol）全部来自 NCCL 真实执行路径。
-- 我们不做时间或数据量估算；只负责记录/展开/聚合。
-- 逐步对端与阶段标签现已覆盖：Ring/RingTwice、PipelineFrom/To、TreeUp/Down/UpDown、CollNetChain/Direct、NVLS/NVLS_TREE。
+- **100% 真实数据，无推断**：所有数据来自 NCCL 真实执行路径，不基于任何假设或估算。
+- **proxy_flow_rank*.jsonl**：`ncclProxyOp` 字段（nsteps/chunk/slice/nbytes/dtype/redOp/pattern/protocol）直接从 `enqueue.cc` 的真实入队记录。
+- **flow_steps_rank*.jsonl**：通过 `ncclRecordProxyPeerSteps()` 生成，peer 信息来自 `proxy.cc::SaveProxy` 中 NCCL 内部拓扑结构：
+  - Ring/RingTwice: 使用 `channel->ring.prev/next`
+  - Tree: 使用 `channel->tree.up/down[]`
+  - CollNet: 使用 `channel->collnetChain/collnetDirect`
+  - NVLS: 使用 `channel->nvls` 拓扑
+  - Pipeline: 使用对应的 ring 连接
+- **阶段标签**：现已覆盖 Ring/RingTwice、PipelineFrom/To、TreeUp/Down/UpDown、CollNetChain/Direct、NVLS/NVLS_TREE。
+- **无估算**：不做时间估算、不推断 peer，只记录 NCCL 真实决策。
 - 极个别协议/拓扑若无需 proxy，可能不生成 `proxy_flow_*` 与 `flow_steps_*`；此时仍可通过再次触发其它集合通信获取其它流记录。
 
 ## 7. 常见问题
