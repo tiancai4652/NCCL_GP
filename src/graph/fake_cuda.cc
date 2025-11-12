@@ -44,7 +44,7 @@ void DebugLog( const char *filefunc, int line, const char *fmt, ...) {
     }
 }
 
-#define MAX_GPU 10
+#define MAX_GPU 256
 
 // GPU info
 static struct{
@@ -166,7 +166,36 @@ cudaError_t CUDARTAPI cudaGraphAddKernelNode(cudaGraphNode_t *pGraphNode, cudaGr
 
 __cudart_builtin__ cudaError_t CUDARTAPI cudaGetDevice(int *device)
 {
-    int tid = -1, i, j;
+//     int tid = -1, i, j;
+//     tid = syscall(SYS_gettid);
+//     *device = 0;
+
+//    // 添加更详细的日志  
+//     char* env_rank = getenv("CURRENT_RANK");  
+//     fprintf(stderr, "[Rank %s] cudaGetDevice: exist_gpu_num=%d\n",   
+//             env_rank ? env_rank : "NULL", exist_gpu_num);  
+    
+//     if (env_rank != NULL) {  
+//         int rank = atoi(env_rank);  
+//         *device = rank % 8;  // 硬编码,避免exist_gpu_num=0的问题  
+//         fprintf(stderr, "[Rank %s] Returning device %d\n", env_rank, *device);  
+//         return cudaSuccess;  
+//     }
+
+//     for(i = 0; i < exist_gpu_num; i++) {
+//         for(j = 0; j < system_gpu[i].tid_num; j++)
+//         {
+//             if(system_gpu[i].tid[j] == tid) {
+//                 *device = system_gpu[i].dev;
+//             }
+//         }
+      
+//     }
+
+//     mlog("%s : %s tid %d device %d", __FILE__, __func__, tid, *device);
+//     return cudaSuccess;
+
+int tid = -1, i, j;
     tid = syscall(SYS_gettid);
     *device = 0;
 
@@ -253,6 +282,26 @@ cudaError_t CUDARTAPI cudaDeviceGetPCIBusId(char *pciBusId, int len, int device)
     mlog("%s : %s device %d busId %s\n", __FILE__, __func__, device, pciBusId);
     
     return cudaSuccess;
+    // char* env_rank = getenv("CURRENT_RANK");  
+    // if (env_rank != NULL) {  
+    //     int current_rank = atoi(env_rank);  
+    //     // 计算目标rank: 当前rank所在节点的起始rank + device  
+    //     int node_start_rank = (current_rank / 8) * 8;  
+    //     int target_rank = node_start_rank + device;  
+          
+    //     if (target_rank < exist_gpu_num) {  
+    //         int64ToBusId(system_gpu[target_rank].busid, pciBusId);  
+    //         fprintf(stderr, "[Rank %s] cudaDeviceGetPCIBusId: device=%d, target_rank=%d, busId=%s\n",   
+    //                 env_rank, device, target_rank, pciBusId);  
+    //         return cudaSuccess;  
+    //     }  
+    // }  
+      
+    // // 回退逻辑  
+    // if (device < exist_gpu_num) {  
+    //     int64ToBusId(system_gpu[device].busid, pciBusId);  
+    // }  
+    // return cudaSuccess;  
 }
 
 cudaError_t CUDARTAPI cudaGraphAddEventWaitNode(cudaGraphNode_t *pGraphNode, cudaGraph_t graph, const cudaGraphNode_t *pDependencies, size_t numDependencies, cudaEvent_t event)
@@ -367,6 +416,39 @@ cudaError_t CUDARTAPI cudaSetDevice(int device)
 
     mlog("%s : %s tid %d bind device %d", __FILE__, __func__, tid, device);
     return cudaSuccess;
+
+    // int tid = -1, i;  
+    // tid = syscall(SYS_gettid);  
+      
+    // // 获取当前进程的全局rank  
+    // char* env_rank = getenv("OMPI_COMM_WORLD_LOCAL_RANK");  
+    // if (env_rank == NULL) {  
+    //     env_rank = getenv("MV2_COMM_WORLD_LOCAL_RANK");  
+    // }  
+    // if (env_rank == NULL) {  
+    //     env_rank = getenv("PMI_RANK");  
+    // }  
+      
+    // int target_rank = device;  
+    // if (env_rank != NULL) {  
+    //     int current_rank = atoi(env_rank);  
+    //     int node_start_rank = (current_rank / 8) * 8;  
+    //     target_rank = node_start_rank + device;  
+    // }  
+      
+    // if (target_rank < exist_gpu_num) {  
+    //     for(i = 0; i < 32; i++) {  
+    //         if(system_gpu[target_rank].tid[i] == 0) {  
+    //             system_gpu[target_rank].tid[i] = tid;  
+    //             system_gpu[target_rank].tid_num++;  
+    //             break;  
+    //         }  
+    //     }  
+    //     system_gpu[target_rank].dev = device;  
+    // }  
+      
+    // mlog("%s : %s device %d target_rank %d tid %d", __FILE__, __func__, device, target_rank, tid);  
+    // return cudaSuccess;  
 }
 
 cudaError_t CUDARTAPI cudaStreamSynchronize(cudaStream_t stream)

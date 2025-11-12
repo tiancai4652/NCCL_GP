@@ -40,7 +40,7 @@ NCCL_ROOT_DIR 指向源码路径，最后的根号不需要
 
 ```bash
 
-export NCCL_ROOT_DIR=/home/gp/NCCL_GP
+export NCCL_ROOT_DIR=/home/zhangran/work/NCCL-SHARP/NCCL_GP
 export CUDA_LIB=$NCCL_ROOT_DIR/fake_cuda/lib
 export CUDA_INC=$NCCL_ROOT_DIR/fake_cuda/include
 export LD_LIBRARY_PATH=$NCCL_ROOT_DIR/fake_cuda/lib:$NCCL_ROOT_DIR/build/lib
@@ -58,7 +58,7 @@ export NCCL_DEBUG_SUBSYS=ALL
 
 ```bash
 chmod +x ./run.sh
-chmod +x src/collectivates/device/gen_rules.sh
+chmod +x src/collectivetes/device/gen_rules.sh
 ```
 
 1. 直接运行脚本

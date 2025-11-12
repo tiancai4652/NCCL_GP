@@ -114,6 +114,17 @@ $(PKGDIR)/%.pc : %.pc
 	mkdir -p $(PKGDIR)
 	install -m 644 $< $@
 
+# 在第 117 行之前添加这个特殊规则  
+$(OBJDIR)/graph/fake_cuda.o : graph/fake_cuda.cc $(INCTARGETS)  
+	@printf "Compiling  %-35s > %s\n" $< $@  
+	mkdir -p `dirname $@`  
+	$(CXX) -I. -I$(INCDIR) $(CXXFLAGS) -fvisibility=default -Iinclude -c $< -o $@  
+	@$(CXX) -I. -I$(INCDIR) $(CXXFLAGS) -fvisibility=default -Iinclude -M $< > $(@:%.o=%.d.tmp)  
+	@sed "0,/^.*:/s//$(subst /,\/,$@):/" $(@:%.o=%.d.tmp) > $(@:%.o=%.d)  
+	@sed -e 's/.*://' -e 's/\\$$//' < $(@:%.o=%.d.tmp) | fmt -1 | \  
+                sed -e 's/^ *//' -e 's/$$/:/' >> $(@:%.o=%.d)  
+	@rm -f $(@:%.o=%.d.tmp)  
+
 $(OBJDIR)/%.o : %.cc $(INCTARGETS)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	mkdir -p `dirname $@`
