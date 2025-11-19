@@ -889,6 +889,13 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   treeGraph.minChannels = ringGraph.nChannels;
   treeGraph.maxChannels = ringGraph.nChannels;
   NCCLCHECKGOTO(ncclTopoCompute(comm->topo, &treeGraph), ret, fail);
+  for (int c=0; c<ringGraph.nChannels; c++) {  
+    printf("[DEBUG] Channel %d: ", c);  
+    for (int g=0; g<16; g++) {  
+      printf("%d ", ringGraph.intra[c*16+g]);  
+    }  
+    printf("\n");  
+  }
   NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, &treeGraph), ret, fail);
 
   collNetGraph.id = 2;

@@ -313,6 +313,10 @@ ncclResult_t ncclTopoGetXmlFromFile(const char* xmlTopoFile, struct ncclXml* xml
   xml->maxIndex = 0;
   NCCLCHECK(xmlLoadSub(file, xml, NULL, handlers, 1));
   fclose(file);
+
+  // 添加这行日志  
+  printf("[DEBUG]XML loaded, maxIndex=%d", xml->maxIndex);  
+  
   return ncclSuccess;
 }
 

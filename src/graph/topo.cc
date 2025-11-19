@@ -366,6 +366,8 @@ ncclResult_t ncclTopoAddGpu(struct ncclXmlNode* xmlGpu, struct ncclTopoSystem* s
   NCCLCHECK(xmlGetAttrInt(xmlGpu, "dev", &gpu->gpu.dev));
   NCCLCHECK(xmlGetAttrInt(xmlGpu, "gdr", &gpu->gpu.gdrSupport));
   // Do not go any further, nvlinks will be added in a second pass
+  // 添加这行日志  
+  printf("[DEBUG]Parsed GPU: dev=%d, rank=%d, sm=%d", gpu->gpu.dev, gpu->gpu.rank, gpu->gpu.cudaCompCap);  
   return ncclSuccess;
 }
 
@@ -550,6 +552,9 @@ ncclResult_t ncclTopoGetSystemFromXml(struct ncclXml* xml, struct ncclTopoSystem
   }
   NCCLCHECK(ncclTopoAddNvLinks(topNode, *topoSystem, NULL));
 
+   // 添加这行日志  
+  printf("[DEBUG]Total GPU nodes parsed: %d", (*topoSystem)->nodes[GPU].count);  
+ 
   NCCLCHECK(ncclTopoFlattenBcmSwitches(*topoSystem));
   NCCLCHECK(ncclTopoConnectCpus(*topoSystem));
   NCCLCHECK(ncclTopoSortSystem(*topoSystem));

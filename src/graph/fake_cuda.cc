@@ -74,6 +74,11 @@ int get_info_from_topo(struct ncclTopoSystem* system, int ngpu)
         system_gpu[rank].sm = system->nodes[GPU].nodes[i].gpu.cudaCompCap;
         system_gpu[rank].rank = system->nodes[GPU].nodes[i].gpu.rank;
         system_gpu[rank].gdr = system->nodes[GPU].nodes[i].gpu.gdrSupport;
+
+        // 添加这行日志  
+        printf("[DEBUG] Mapped GPU %d: rank=%d, dev=%d, busid=0x%lx\n",   
+            i, rank, system_gpu[rank].dev, system_gpu[rank].busid);  
+            
         mlog("Init from Topo, I can see GPU %d : id 0x%lx dev %d sm %d rank %d gdr %d\n", i, system_gpu[rank].busid, system_gpu[rank].dev,system_gpu[rank].sm,system_gpu[rank].rank,system_gpu[rank].gdr);
     }
 

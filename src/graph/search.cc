@@ -646,6 +646,7 @@ ncclResult_t ncclTopoSearchRec(struct ncclTopoSystem* system, struct ncclTopoGra
       }
     }
   }
+  INFO(NCCL_GRAPH, "Starting graph search for pattern %d, nChannels=%d", graph->pattern, graph->nChannels);
   return ncclSuccess;
 }
 
