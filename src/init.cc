@@ -467,6 +467,8 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   info->hostHash=getHostHash()+commHash;
   info->pidHash=getPidHash()+commHash;
 
+  printf("[DEBUG][Rank %d] hostHash=%lx\n", info->rank, info->hostHash);
+
   // Get the device MAJOR:MINOR of /dev/shm so we can use that
   // information to decide whether we can use SHM for inter-process
   // communication in a container environment

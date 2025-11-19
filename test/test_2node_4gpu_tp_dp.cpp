@@ -62,7 +62,7 @@ int main(int argc, char* argv[])
          myRank, getenv("NCCL_HOSTID"), localRank);  
     
   // 计算TP和DP的color和key  
-  int tp_size = 8;  
+  int tp_size = 4;  
   int dp_size = 2;  
   int tp_rank = myRank % tp_size;  // TP组内的rank  
   int dp_rank = myRank / tp_size;  // DP组的编号  

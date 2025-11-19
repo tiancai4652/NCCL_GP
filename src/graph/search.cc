@@ -37,6 +37,7 @@ ncclResult_t ncclTopoSearchInit(struct ncclTopoSystem* system) {
   system->maxBw = 0.0;
   system->totalBw = 0.0;
   int inter = system->nodes[NET].count;
+  INFO(NCCL_GRAPH, "[DEBUG] NET device count: %d", system->nodes[NET].count);  
   if (inter == 0 && system->nodes[GPU].count == 1) {
     system->maxBw = LOC_BW;
     return ncclSuccess;
@@ -506,6 +507,10 @@ ncclResult_t ncclTopoSearchRecGpu(struct ncclTopoSystem* system, struct ncclTopo
 }
 
 ncclResult_t ncclTopoSearchRecNet(struct ncclTopoSystem* system, struct ncclTopoGraph* graph, struct ncclTopoGraph* saveGraph, int backToNet, int backToFirstRank, int* time) {
+  
+  INFO(NCCL_GRAPH, "[DEBUG] Starting NET search: NET count=%d, backToNet=%d",   
+    system->nodes[NET].count, backToNet);  
+  
   const int bw = graph->bwInter;
   int* nets;
   NCCLCHECK(ncclCalloc(&nets, system->nodes[NET].count));
@@ -606,12 +611,17 @@ ncclResult_t ncclTopoSearchRecNet(struct ncclTopoSystem* system, struct ncclTopo
  *                                       `--> NET n (or m if crossNic)
  */
 ncclResult_t ncclTopoSearchParams(struct ncclTopoSystem* system, int pattern, int* backToNet, int* backToFirstRank) {
+  INFO(NCCL_GRAPH, "[DEBUG] Search params: NET count=%d, GPU count=%d, pattern=%d",   
+    system->nodes[NET].count, system->nodes[GPU].count, pattern);  
+ 
   if (system->nodes[NET].count) {
+    INFO(NCCL_GRAPH, "[DEBUG] Using inter-node search (NET devices available)");  
     if (pattern == NCCL_TOPO_PATTERN_RING) *backToNet = system->nodes[GPU].count-1;
     else if (pattern == NCCL_TOPO_PATTERN_SPLIT_TREE) *backToNet = 1;
     else *backToNet = 0;
     *backToFirstRank = -1;
   } else {
+    INFO(NCCL_GRAPH, "[DEBUG] Using intra-node search (no NET devices)");  
     *backToNet = -1;
     if (pattern == NCCL_TOPO_PATTERN_RING) *backToFirstRank = system->nodes[GPU].count-1;
     else *backToFirstRank = -1;

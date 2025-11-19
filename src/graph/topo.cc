@@ -326,6 +326,11 @@ ncclResult_t ncclTopoAddNet(struct ncclXmlNode* xmlNet, struct ncclTopoSystem* s
 
   struct ncclTopoNode* net;
   NCCLCHECK(ncclTopoCreateNode(system, &net, NET, dev));
+
+  INFO(NCCL_GRAPH, "[DEBUG] Created NET node: dev=%d, total NET count=%d",   
+    dev, system->nodes[NET].count);  
+
+    
   const char* str;
   NCCLCHECK(xmlGetAttr(xmlNet, "guid", &str));
   if (str) sscanf(str, "0x%lx", &net->net.asic);
