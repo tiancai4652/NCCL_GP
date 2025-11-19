@@ -1,7 +1,7 @@
 #!/bin/bash  
 # NCCL_GP 环境变量设置脚本  
   
-export NCCL_ROOT_DIR=/home/zhangran/work/NCCL-SHARP/NCCL_GP  
+export NCCL_ROOT_DIR=/workspace/fake-nccl/NCCL_GP
 export CUDA_LIB=$NCCL_ROOT_DIR/fake_cuda/lib  
 export CUDA_INC=$NCCL_ROOT_DIR/fake_cuda/include  
 export LD_LIBRARY_PATH=$NCCL_ROOT_DIR/fake_cuda/lib:$NCCL_ROOT_DIR/build/lib  
