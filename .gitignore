@@ -3,3 +3,4 @@
 *.gcov
 /coverage/
 test/output/
+test/rank_logs/
