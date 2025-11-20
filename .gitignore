@@ -4,3 +4,5 @@
 /coverage/
 test/output/
 test/rank_logs/
+test/rank_logs_1/
+test/rank_logs2/
