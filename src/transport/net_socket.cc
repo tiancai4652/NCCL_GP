@@ -59,6 +59,8 @@ ncclResult_t ncclNetSocketInit(ncclDebugLogger_t logFunction) {
               ncclSocketToString(&addrs[i], addrline));
         }
         line[MAX_LINE_LEN] = '\0';
+        printf("[DEBUG] Socket network initialized: found %d interfaces\n", ncclNetIfs);  
+        fflush(stdout);  
         INFO(NCCL_INIT|NCCL_NET,"NET/Socket : Using%s", line);
       }
     }
@@ -293,6 +295,12 @@ ncclResult_t ncclNetSocketListen(int dev, void* opaqueHandle, void** listenComm)
   NCCLCHECK(ncclSocketInit(&comm->sock, &ncclNetSocketDevs[dev].addr, handle->magic, ncclSocketTypeNetSocket, NULL, 1));
   NCCLCHECK(ncclSocketListen(&comm->sock));
   NCCLCHECK(ncclSocketGetAddr(&comm->sock, &handle->connectAddr));
+
+  char addrStr[SOCKET_NAME_MAXLEN+1];  
+  ncclSocketToString(&handle->connectAddr, addrStr);  
+  printf("[DEBUG] Socket listen successful on dev=%d, addr=%s\n", dev, addrStr);  
+  fflush(stdout);  
+
   NCCLCHECK(ncclNetSocketGetNsockNthread(dev, &comm->nSocks, &comm->nThreads));
   handle->nSocks = comm->nSocks;
   handle->nThreads = comm->nThreads;
@@ -335,6 +343,10 @@ ncclResult_t ncclNetSocketConnect(int dev, void* opaqueHandle, void** sendComm) 
 socket_connect_check:
     NCCLCHECK(ncclSocketReady(sock, &ready));
     if (! ready) return ncclSuccess;
+
+    printf("[DEBUG] Socket connect successful: dev=%d, sock=%d\n", dev, i);  
+    fflush(stdout);  
+
     stage->state = ncclNetSocketCommStateSend;
 
 socket_send:
@@ -377,6 +389,9 @@ ncclResult_t ncclNetSocketAccept(void* listenComm, void** recvComm) {
 socket_accept_check:
     NCCLCHECK(ncclSocketReady(sock, &ready));
     if (!ready) return ncclSuccess;
+
+    printf("[DEBUG] Socket accept successful: sock=%d\n", i);  
+    fflush(stdout); 
 
     stage->state = ncclNetSocketCommStateRecv;
 socket_recv:

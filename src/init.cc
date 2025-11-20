@@ -24,6 +24,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "graph/topo.h"
 // Add
 extern int get_info_from_topo(struct ncclTopoSystem* system, int ngpu);
 
@@ -854,6 +855,17 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // Print final topology
   NCCLCHECKGOTO(ncclTopoPrint(comm->topo), ret, fail);
 
+  // 添加验证日志  
+  for (int g=0; g<comm->topo->nodes[GPU].count; g++) {  
+    for (int p=0; p<comm->topo->nodes[GPU].count; p++) {  
+      if (g == p) continue;  
+      int pathType = comm->topo->nodes[GPU].nodes[g].paths[GPU][p].type;  
+      if (pathType == PATH_NET) {  
+        INFO(NCCL_INIT, "[DEBUG][VERIFY] GPU %d -> GPU %d: path type = NET (%d)", g, p, pathType);  
+      }  
+    }  
+  }
+
   // Set Affinity to a CPU local the our GPU, so that all memory we allocate
   // on the host is local.
   NCCLCHECKGOTO(ncclTopoGetCpuAffinity(comm->topo, comm->rank, &comm->cpuAffinity), ret, fail);
@@ -1610,7 +1622,16 @@ static ncclResult_t ncclCommInitRankDev(ncclComm_t* newcomm, int nranks, ncclUni
 
   // Add: First get topo from file, so that we can know how many device in system
   NCCLCHECKGOTO(ncclTopoGetSystem(comm, &comm->topo), res, fail);
-  get_info_from_topo(comm->topo, nranks);
+  // get_info_from_topo(comm->topo, nranks);
+
+  NCCLCHECKGOTO(ncclTopoGetSystem(comm, &comm->topo), res, fail);  
+  printf("[DEBUG] Before get_info_from_topo: nranks=%d, GPU count=%d\n",   
+        nranks, comm->topo->nodes[GPU].count);  
+  fflush(stdout);  
+  get_info_from_topo(comm->topo, nranks);  
+  printf("[DEBUG] After get_info_from_topo: GPU count=%d\n",   
+        comm->topo->nodes[GPU].count);  
+  fflush(stdout);
 
   NCCLCHECKGOTO(ncclAsyncLaunch(&job->base, ncclCommInitRankFunc, NULL, free, comm), res, fail);
 

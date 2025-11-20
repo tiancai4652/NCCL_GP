@@ -124,7 +124,13 @@ static ncclResult_t ncclTopoFollowPath(struct ncclTopoSystem* system, struct ncc
   float bw = intra ? graph->bwIntra : graph->bwInter;
   int type = intra ? graph->typeIntra : graph->typeInter;
 
-  if (mult == 1 && (path->type > type)) return ncclSuccess;
+  if (mult == 1 && (path->type > type)) {  
+    // printf("[DEBUG] Path rejected: from %s/%d to %s/%d, path->type=%d (%s) > allowed type=%d (%s)\n",  
+    //        topoNodeTypeStr[type1], index1, topoNodeTypeStr[type2], index2,  
+    //        path->type, topoPathTypeStr[path->type], type, topoPathTypeStr[type]);  
+    // fflush(stdout);  
+    return ncclSuccess;  
+  }  
   if (mult == 1 && (graph->pattern == NCCL_TOPO_PATTERN_BALANCED_TREE ||
         graph->pattern == NCCL_TOPO_PATTERN_TREE ||
         graph->pattern == NCCL_TOPO_PATTERN_SPLIT_TREE) &&
@@ -508,8 +514,8 @@ ncclResult_t ncclTopoSearchRecGpu(struct ncclTopoSystem* system, struct ncclTopo
 
 ncclResult_t ncclTopoSearchRecNet(struct ncclTopoSystem* system, struct ncclTopoGraph* graph, struct ncclTopoGraph* saveGraph, int backToNet, int backToFirstRank, int* time) {
   
-  INFO(NCCL_GRAPH, "[DEBUG] Starting NET search: NET count=%d, backToNet=%d",   
-    system->nodes[NET].count, backToNet);  
+  // INFO(NCCL_GRAPH, "[DEBUG] Starting NET search: NET count=%d, backToNet=%d",   
+  //   system->nodes[NET].count, backToNet);  
   
   const int bw = graph->bwInter;
   int* nets;
@@ -611,17 +617,17 @@ ncclResult_t ncclTopoSearchRecNet(struct ncclTopoSystem* system, struct ncclTopo
  *                                       `--> NET n (or m if crossNic)
  */
 ncclResult_t ncclTopoSearchParams(struct ncclTopoSystem* system, int pattern, int* backToNet, int* backToFirstRank) {
-  INFO(NCCL_GRAPH, "[DEBUG] Search params: NET count=%d, GPU count=%d, pattern=%d",   
-    system->nodes[NET].count, system->nodes[GPU].count, pattern);  
+  // INFO(NCCL_GRAPH, "[DEBUG] Search params: NET count=%d, GPU count=%d, pattern=%d",   
+  //   system->nodes[NET].count, system->nodes[GPU].count, pattern);  
  
   if (system->nodes[NET].count) {
-    INFO(NCCL_GRAPH, "[DEBUG] Using inter-node search (NET devices available)");  
+    // INFO(NCCL_GRAPH, "[DEBUG] Using inter-node search (NET devices available)");  
     if (pattern == NCCL_TOPO_PATTERN_RING) *backToNet = system->nodes[GPU].count-1;
     else if (pattern == NCCL_TOPO_PATTERN_SPLIT_TREE) *backToNet = 1;
     else *backToNet = 0;
     *backToFirstRank = -1;
   } else {
-    INFO(NCCL_GRAPH, "[DEBUG] Using intra-node search (no NET devices)");  
+    // INFO(NCCL_GRAPH, "[DEBUG] Using intra-node search (no NET devices)");  
     *backToNet = -1;
     if (pattern == NCCL_TOPO_PATTERN_RING) *backToFirstRank = system->nodes[GPU].count-1;
     else *backToFirstRank = -1;
@@ -656,7 +662,7 @@ ncclResult_t ncclTopoSearchRec(struct ncclTopoSystem* system, struct ncclTopoGra
       }
     }
   }
-  INFO(NCCL_GRAPH, "Starting graph search for pattern %d, nChannels=%d", graph->pattern, graph->nChannels);
+  // INFO(NCCL_GRAPH, "Starting graph search for pattern %d, nChannels=%d", graph->pattern, graph->nChannels);
   return ncclSuccess;
 }
 
@@ -809,6 +815,9 @@ float sm90SpeedArrayInter[] = { 48.0, 45.0, 42.0, 40.0, 30.0, 24.0, 20.0, 17.5, 
 
 ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph) {
   int ngpus = system->nodes[GPU].count;
+  printf("[DEBUG] ncclTopoCompute: pattern=%d, nRanks=%d, nChannels=%d\n",     
+    graph->pattern, ngpus, graph->nChannels);  
+  fflush(stdout);
   graph->crossNic = ncclParamCrossNic();
   int crossNic = (system->nodes[NET].count > 1) && graph->crossNic &&
 	 (graph->pattern == NCCL_TOPO_PATTERN_RING ||
@@ -875,7 +884,19 @@ search:
   tmpGraph.nChannels = 0;
   globalTimeout -= time;
 
-  NCCLCHECK(ncclTopoSearchRec(system, &tmpGraph, graph, &time));
+  //NCCLCHECK(ncclTopoSearchRec(system, &tmpGraph, graph, &time));
+   // 添加调试日志  
+   printf("[DEBUG] Search attempt: pattern=%d, typeIntra=%d (%s), typeInter=%d (%s), bw=%.1f/%.1f\n",  
+    tmpGraph.pattern, tmpGraph.typeIntra, topoPathTypeStr[tmpGraph.typeIntra],  
+    tmpGraph.typeInter, topoPathTypeStr[tmpGraph.typeInter],  
+    tmpGraph.bwIntra, tmpGraph.bwInter);  
+    fflush(stdout);  
+
+    NCCLCHECK(ncclTopoSearchRec(system, &tmpGraph, graph, &time));  
+
+    printf("[DEBUG] Search result: nChannels=%d, time remaining=%d\n", graph->nChannels, time);  
+    fflush(stdout);
+
 #if 0
   printf("Pattern %d, crossNic %d, Bw %g/%g, type %d/%d, channels %d-%d sameChannels %d -> nChannels %dx%g/%g %s\n", tmpGraph.pattern, tmpGraph.crossNic, tmpGraph.bwInter, tmpGraph.bwIntra, tmpGraph.typeInter, tmpGraph.typeIntra, tmpGraph.minChannels, tmpGraph.maxChannels, tmpGraph.sameChannels, graph->nChannels, graph->bwInter, graph->bwIntra, time == 0 ? "TIMEOUT" : time == -1 ? "PERFECT" : "");
   for (int c=0; c<graph->nChannels; c++) {
@@ -1027,6 +1048,7 @@ ncclResult_t ncclTopoDumpGraphs(struct ncclTopoSystem* system, int ngraphs, stru
   }
   return ncclSuccess;
 }
+
 
 #include "comm.h"
 // NVLS channels aren't compute channels. Find which NIC corresponds to our rank being the head
