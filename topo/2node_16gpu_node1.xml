@@ -1,0 +1,69 @@
+<system version="1">
+  <cpu numaid="0x1" affinity="0x1" arch="x86_64" vendor="GenuineIntel" familyid="6" modelid="106">
+    <pci busid="0000:00:00.0" class="0x060400" link_speed="16.0 GT/s PCIe" link_width="16">
+      <pci busid="0000:01.0" class="0x030200" link_speed="16.0 GT/s PCIe" link_width="16">
+        <gpu dev="0" sm="80" rank="0" gdr="1">
+          <nvlink target="0000:02.0" count="2" tclass="0x030200"/>
+          <nvlink target="0000:03.0" count="1" tclass="0x030200"/>
+        </gpu>
+      </pci>
+      <pci busid="0000:02.0" class="0x030200" link_speed="16.0 GT/s PCIe" link_width="16">
+        <gpu dev="1" sm="80" rank="1" gdr="1">
+          <nvlink target="0000:01.0" count="2" tclass="0x030200"/>
+          <nvlink target="0000:03.0" count="2" tclass="0x030200"/>
+          <nvlink target="0000:04.0" count="1" tclass="0x030200"/>
+        </gpu>
+      </pci>
+      <pci busid="0000:03.0" class="0x030200" link_speed="16.0 GT/s PCIe" link_width="16">
+        <gpu dev="2" sm="80" rank="2" gdr="1">
+          <nvlink target="0000:01.0" count="1" tclass="0x030200"/>
+          <nvlink target="0000:02.0" count="2" tclass="0x030200"/>
+          <nvlink target="0000:04.0" count="2" tclass="0x030200"/>
+          <nvlink target="0000:05.0" count="1" tclass="0x030200"/>
+        </gpu>
+      </pci>
+      <pci busid="0000:04.0" class="0x030200" link_speed="16.0 GT/s PCIe" link_width="16">
+        <gpu dev="3" sm="80" rank="3" gdr="1">
+          <nvlink target="0000:02.0" count="1" tclass="0x030200"/>
+          <nvlink target="0000:03.0" count="2" tclass="0x030200"/>
+          <nvlink target="0000:05.0" count="2" tclass="0x030200"/>
+          <nvlink target="0000:06.0" count="1" tclass="0x030200"/>
+        </gpu>
+      </pci>
+      <pci busid="0000:05.0" class="0x030200" link_speed="16.0 GT/s PCIe" link_width="16">
+        <gpu dev="4" sm="80" rank="4" gdr="1">
+          <nvlink target="0000:03.0" count="1" tclass="0x030200"/>
+          <nvlink target="0000:04.0" count="2" tclass="0x030200"/>
+          <nvlink target="0000:06.0" count="2" tclass="0x030200"/>
+          <nvlink target="0000:07.0" count="1" tclass="0x030200"/>
+        </gpu>
+      </pci>
+      <pci busid="0000:06.0" class="0x030200" link_speed="16.0 GT/s PCIe" link_width="16">
+        <gpu dev="5" sm="80" rank="5" gdr="1">
+          <nvlink target="0000:04.0" count="1" tclass="0x030200"/>
+          <nvlink target="0000:05.0" count="2" tclass="0x030200"/>
+          <nvlink target="0000:07.0" count="2" tclass="0x030200"/>
+          <nvlink target="0000:08.0" count="1" tclass="0x030200"/>
+        </gpu>
+      </pci>
+      <pci busid="0000:07.0" class="0x030200" link_speed="16.0 GT/s PCIe" link_width="16">
+        <gpu dev="6" sm="80" rank="6" gdr="1">
+          <nvlink target="0000:05.0" count="1" tclass="0x030200"/>
+          <nvlink target="0000:06.0" count="2" tclass="0x030200"/>
+          <nvlink target="0000:08.0" count="2" tclass="0x030200"/>
+        </gpu>
+      </pci>
+      <pci busid="0000:08.0" class="0x030200" link_speed="16.0 GT/s PCIe" link_width="16">
+        <gpu dev="7" sm="80" rank="7" gdr="1">
+          <nvlink target="0000:06.0" count="1" tclass="0x030200"/>
+          <nvlink target="0000:07.0" count="2" tclass="0x030200"/>
+        </gpu>
+      </pci>
+      <pci busid="0000:10.0" class="0x020000" link_speed="16.0 GT/s PCIe" link_width="4">
+        <nic>
+          <net name="eth0" dev="0" speed="100000" port="0" latency="0.000000" guid="0x0" maxconn="65536" gdr="1"/>
+        </nic>
+      </pci>
+    </pci>
+  </cpu>
+</system>
