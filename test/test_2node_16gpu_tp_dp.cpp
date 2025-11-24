@@ -41,6 +41,7 @@ int main(int argc, char* argv[])
     
   // 初始化MPI  
   MPICHECK(MPI_Init(&argc, &argv));  
+  // MPI_Barrier(MPI_COMM_WORLD); 
   printf("MPI_Init done\n");
   MPICHECK(MPI_Comm_rank(MPI_COMM_WORLD, &myRank));  
   MPICHECK(MPI_Comm_size(MPI_COMM_WORLD, &nRanks));  

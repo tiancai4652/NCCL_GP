@@ -429,5 +429,28 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   free(treeToChild1);
   free(nvlsHeads);
 
+  if (comm->rank == 0) {  
+    INFO(NCCL_GRAPH, "=== Final Complete Ring Topology ===");  
+    for (int c=0; c<nChannels; c++) {  
+      char line[2048];  
+      sprintf(line, "Channel %d: ", c);  
+      int offset = strlen(line);  
+        
+      // 打印完整的ring  
+      for (int r=0; r<nranks; r++) {  
+        sprintf(line+offset, "%d -> ", r);  
+        offset = strlen(line);  
+      }  
+      sprintf(line+offset, "0 (complete ring)");  
+      INFO(NCCL_GRAPH, "%s", line);  
+        
+      // 打印每个rank的prev和next  
+      for (int r=0; r<nranks; r++) {  
+        INFO(NCCL_GRAPH, "  Rank %d: prev=%d, next=%d",   
+             r, ringPrev[c*nranks+r], ringNext[c*nranks+r]);  
+      }  
+    }  
+  }
+
   return ncclSuccess;
 }
