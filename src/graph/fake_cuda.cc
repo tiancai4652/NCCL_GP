@@ -116,6 +116,9 @@ cudaError_t CUDARTAPI cudaMemcpyAsync(void *dst, const void *src, size_t count, 
 
 cudaError_t CUDARTAPI cudaStreamGetCaptureInfo(cudaStream_t stream, enum cudaStreamCaptureStatus *pCaptureStatus, unsigned long long *pId)
 {
+    // 在 fake_cuda 中，stream 永远不会被 captured
+    if (pCaptureStatus) *pCaptureStatus = cudaStreamCaptureStatusNone;
+    if (pId) *pId = 0;
     mlog("%s : %s Line :%d", __FILE__, __func__, __LINE__);
     return cudaSuccess;
 }
@@ -364,6 +367,12 @@ cudaError_t CUDARTAPI cudaFreeHost(void *ptr)
 
 cudaError_t CUDARTAPI cudaStreamGetCaptureInfo_v2(cudaStream_t stream, enum cudaStreamCaptureStatus *captureStatus_out, unsigned long long *id_out, cudaGraph_t *graph_out, const cudaGraphNode_t **dependencies_out, size_t *numDependencies_out)
 {
+    // 在 fake_cuda 中，stream 永远不会被 captured
+    if (captureStatus_out) *captureStatus_out = cudaStreamCaptureStatusNone;
+    if (id_out) *id_out = 0;
+    if (graph_out) *graph_out = NULL;
+    if (dependencies_out) *dependencies_out = NULL;
+    if (numDependencies_out) *numDependencies_out = 0;
     mlog("%s : %s Line :%d", __FILE__, __func__, __LINE__);
     return cudaSuccess;
 }
