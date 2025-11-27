@@ -46,6 +46,9 @@ void DebugLog( const char *filefunc, int line, const char *fmt, ...) {
 
 #define MAX_GPU 256
 
+// 逻辑节点ID（从环境变量NCCL_HOSTID获取）
+static int g_hostId = -1;
+
 // GPU info
 static struct{
     int64_t busid;
@@ -60,6 +63,22 @@ static char exist_gpu_num = 0;
 
 // 保留指针，后面用到一些信息
 static struct ncclTopoSystem *local_sys_top;
+
+// 初始化fake_cuda，获取逻辑节点ID
+static void initFakeCudaHostId() {
+    // 每次都重新读取环境变量（因为可能在运行时设置）
+    char* hostId = getenv("NCCL_HOSTID");
+    if (hostId != NULL) {
+        int newHostId = atoi(hostId);
+        if (newHostId != g_hostId || g_hostId == -1) {
+            g_hostId = newHostId;
+            printf("[fake_cuda] Set NCCL_HOSTID=%d (from env: %s)\n", g_hostId, hostId);
+        }
+    } else if (g_hostId == -1) {
+        g_hostId = 0;  // 默认节点0
+        printf("[fake_cuda] NCCL_HOSTID not set, defaulting to 0\n");
+    }
+}
 
 int get_info_from_topo(struct ncclTopoSystem* system, int ngpu)
 {
@@ -87,7 +106,11 @@ int get_info_from_topo(struct ncclTopoSystem* system, int ngpu)
 
 cudaError_t CUDARTAPI cudaMemcpyAsync(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream)
 {   
-    mlog("%s : %s Line :%d", __FILE__, __func__, __LINE__);
+    // 在fake_cuda环境中，所有内存都是主机内存，直接执行memcpy
+    if (dst && src && count > 0) {
+        memcpy(dst, src, count);
+    }
+    mlog("%s : %s dst=%p src=%p count=%zu kind=%d", __FILE__, __func__, dst, src, count, kind);
     return cudaSuccess;
 }
 
@@ -280,11 +303,22 @@ cudaError_t CUDARTAPI cudaGraphAddHostNode(cudaGraphNode_t *pGraphNode, cudaGrap
 
 cudaError_t CUDARTAPI cudaDeviceGetPCIBusId(char *pciBusId, int len, int device)
 {
-    if (device > exist_gpu_num) {
-        mlog("%s : %s Line_%d : device %d bigger than exist_gpu_num %d i know. Check !", __FILE__, __func__, __LINE__, device, exist_gpu_num);
-    }
-    int64ToBusId(system_gpu[device].busid, pciBusId);
-    mlog("%s : %s device %d busId %s\n", __FILE__, __func__, device, pciBusId);
+    // 初始化逻辑节点ID
+    initFakeCudaHostId();
+    
+    // 根据逻辑节点ID和设备号生成busId
+    // 格式要匹配XML：0000:01.0 (不是 0000:01:00.0)
+    // Node0 (hostId=0): 0000:01.0 - 0000:08.0  (busId 0x10 - 0x80)
+    // Node1 (hostId=1): 0100:01.0 - 0100:08.0  (busId 0x100010 - 0x100080)
+    // Node2 (hostId=2): 0200:01.0 - 0200:08.0  (busId 0x200010 - 0x200080)
+    
+    int segment = (g_hostId == 0) ? 0 : (0x100 * g_hostId);
+    int busNum = device + 1;  // device 0-7 对应 bus 01-08
+    
+    snprintf(pciBusId, len, "%04x:%02x.0", segment, busNum);
+    
+    printf("[fake_cuda] cudaDeviceGetPCIBusId: hostId=%d, device=%d -> busId=%s\n", 
+           g_hostId, device, pciBusId);
     
     return cudaSuccess;
     // char* env_rank = getenv("CURRENT_RANK");  
@@ -336,7 +370,13 @@ cudaError_t CUDARTAPI cudaStreamGetCaptureInfo_v2(cudaStream_t stream, enum cuda
 
 cudaError_t CUDARTAPI cudaIpcOpenMemHandle(void **devPtr, cudaIpcMemHandle_t handle, unsigned int flags)
 {
-    mlog("%s : %s Line :%d", __FILE__, __func__, __LINE__);
+    // 在fake_cuda环境中，从handle中解码devPtr地址
+    // 因为所有进程通过MPI/fork启动，在同一地址空间中
+    if (devPtr) {
+        // 从handle中读取指针值
+        *devPtr = *(void**)&handle;
+    }
+    mlog("%s : %s devPtr=%p flags=%u", __FILE__, __func__, devPtr ? *devPtr : NULL, flags);
     return cudaSuccess;
 }
 
@@ -483,7 +523,14 @@ cudaError_t CUDARTAPI cudaHostAlloc(void **pHost, size_t size, unsigned int flag
 
 cudaError_t CUDARTAPI cudaIpcGetMemHandle(cudaIpcMemHandle_t *handle, void *devPtr)
 {
-    mlog("%s : %s Line :%d", __FILE__, __func__, __LINE__);
+    // 在fake_cuda环境中，将devPtr地址编码到handle中
+    // 因为所有进程在同一台机器上，地址空间共享（通过fork）
+    if (handle && devPtr) {
+        memset(handle, 0, sizeof(cudaIpcMemHandle_t));
+        // 将指针值直接存储在handle中
+        *(void**)handle = devPtr;
+    }
+    mlog("%s : %s devPtr=%p", __FILE__, __func__, devPtr);
     return cudaSuccess;
 }
 
@@ -502,7 +549,11 @@ __cudart_builtin__ cudaError_t CUDARTAPI cudaMalloc(void **devPtr, size_t size)
 
 cudaError_t CUDARTAPI cudaMemcpy(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind)
 {
-    mlog("%s : %s Line :%d", __FILE__, __func__, __LINE__);
+    // 在fake_cuda环境中，所有内存都是主机内存，直接执行memcpy
+    if (dst && src && count > 0) {
+        memcpy(dst, src, count);
+    }
+    mlog("%s : %s dst=%p src=%p count=%zu kind=%d", __FILE__, __func__, dst, src, count, kind);
     return cudaSuccess;
 }
 

@@ -805,6 +805,51 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   }
   // AllGather1 - end
 
+  // 重新映射 GPU rank 到当前 comm 的 rank（通过 busId 匹配）
+  // 对于split comm，XML中的全局rank需要映射到新comm的local rank
+  if (comm->topo != NULL && comm->topo->nodes[GPU].count > 0) {
+    INFO(NCCL_INIT, "Rank %d: Remapping GPU ranks to current comm ranks via busId", rank);
+    
+    int newGpuCount = 0;
+    for (int g = 0; g < comm->topo->nodes[GPU].count; g++) {
+      struct ncclTopoNode* gpu = comm->topo->nodes[GPU].nodes + g;
+      int64_t gpuBusId = gpu->id;
+      int xmlRank = gpu->gpu.rank;
+      
+      // 在当前 comm 的 peerInfo 中查找匹配的 busId
+      int found = 0;
+      for (int r = 0; r < nranks; r++) {
+        if (comm->peerInfo[r].busId == gpuBusId) {
+          // 找到了！r 就是这个 GPU 在当前 comm 中的 rank
+          gpu->gpu.rank = r;
+          
+          INFO(NCCL_INIT, "Rank %d: Mapped GPU %d (busId=0x%lx) XML_rank=%d -> comm_rank=%d",
+               rank, g, gpuBusId, xmlRank, r);
+          
+          // 如果这个GPU不是第newGpuCount个，需要移动它
+          if (newGpuCount != g) {
+            comm->topo->nodes[GPU].nodes[newGpuCount] = *gpu;
+          }
+          newGpuCount++;
+          found = 1;
+          break;
+        }
+      }
+      
+      if (!found) {
+        INFO(NCCL_INIT, "Rank %d: GPU %d (busId=0x%lx, XML_rank=%d) not in current comm, skipping",
+             rank, g, gpuBusId, xmlRank);
+      }
+    }
+    
+    // 更新GPU数量
+    int originalCount = comm->topo->nodes[GPU].count;
+    comm->topo->nodes[GPU].count = newGpuCount;
+    
+    INFO(NCCL_INIT, "Rank %d: GPU rank remapping completed, kept %d/%d GPUs for comm ranks=%d",
+         rank, newGpuCount, originalCount, nranks);
+  }
+
   do {
     // Compute intra-process ranks
     int intraProcRank0 = -1, intraProcRank = -1, intraProcRanks = 0;
@@ -1620,18 +1665,15 @@ static ncclResult_t ncclCommInitRankDev(ncclComm_t* newcomm, int nranks, ncclUni
   job->myrank = myrank;
   job->cudaDev = cudaDev;
 
-  // Add: First get topo from file, so that we can know how many device in system
+  // 加载完整的XML拓扑（包含所有节点的GPU）
   NCCLCHECKGOTO(ncclTopoGetSystem(comm, &comm->topo), res, fail);
-  // get_info_from_topo(comm->topo, nranks);
-
-  NCCLCHECKGOTO(ncclTopoGetSystem(comm, &comm->topo), res, fail);  
-  printf("[DEBUG] Before get_info_from_topo: nranks=%d, GPU count=%d\n",   
-        nranks, comm->topo->nodes[GPU].count);  
-  fflush(stdout);  
-  get_info_from_topo(comm->topo, nranks);  
-  printf("[DEBUG] After get_info_from_topo: GPU count=%d\n",   
-        comm->topo->nodes[GPU].count);  
-  fflush(stdout);
+  
+  // 通知fake_cuda系统中有多少个GPU（用于兼容性，实际busId由fake_cuda根据NCCL_HOSTID生成）
+  if (comm->topo && comm->topo->nodes[GPU].count > 0) {
+    get_info_from_topo(comm->topo, comm->topo->nodes[GPU].count);
+    INFO(NCCL_INIT, "Rank %d: Loaded topology with %d GPUs (nranks=%d)",
+         myrank, comm->topo->nodes[GPU].count, nranks);
+  }
 
   NCCLCHECKGOTO(ncclAsyncLaunch(&job->base, ncclCommInitRankFunc, NULL, free, comm), res, fail);
 

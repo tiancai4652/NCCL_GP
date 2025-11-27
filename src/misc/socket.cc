@@ -609,10 +609,7 @@ ncclResult_t ncclSocketConnect(struct ncclSocket* sock) {
     if (sock->state == ncclSocketStateError) return ncclRemoteError;
     return ncclInternalError;
   }
-  TRACE(NCCL_INIT|NCCL_NET,"Connecting to socket %s", ncclSocketToString(&sock->addr, line));
-
-  printf("[DEBUG] Socket connecting to %s\n", ncclSocketToString(&sock->addr, line));  
-  fflush(stdout); 
+  TRACE(NCCL_INIT|NCCL_NET,"Connecting to socket %s", ncclSocketToString(&sock->addr, line)); 
 
   SYSCHECK(setsockopt(sock->fd, IPPROTO_TCP, TCP_NODELAY, (char*)&one, sizeof(int)), "setsockopt");
 

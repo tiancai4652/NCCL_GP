@@ -548,7 +548,10 @@ ncclResult_t ncclNetSocketTest(void* request, int* done, int* size) {
 }
 
 ncclResult_t ncclNetSocketRegMr(void* comm, void* data, int size, int type, void** mhandle) {
-  return (type != NCCL_PTR_HOST) ? ncclInternalError : ncclSuccess;
+  // 仿真模式：fake_cuda环境中，CUDA内存实际上是主机内存，可以直接注册
+  // 返回一个假的mhandle（实际上不会被使用）
+  if (mhandle) *mhandle = data; // 返回原始指针作为假handle
+  return ncclSuccess;
 }
 ncclResult_t ncclNetSocketDeregMr(void* comm, void* mhandle) { return ncclSuccess; }
 

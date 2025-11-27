@@ -47,20 +47,26 @@ int main(int argc, char* argv[])
   MPICHECK(MPI_Comm_size(MPI_COMM_WORLD, &nRanks));  
 
   printf("myRank=%d, nRanks=%d\n", myRank, nRanks);
-    
+  
   // 2机16卡配置: TP=8, DP=2  
   // 节点0: rank 0-7 (TP组0)  
   // 节点1: rank 8-15 (TP组1)  
+  int hostId;
   if (myRank < 8) {  
-    setenv("NCCL_HOSTID", "node0", 1);  
+    hostId = 0;
     localRank = myRank;  
   } else {  
-    setenv("NCCL_HOSTID", "node1", 1);  
+    hostId = 1;
     localRank = myRank - 8;  
   }  
+  
+  // 设置NCCL_HOSTID（fake_cuda需要数字）
+  char hostIdStr[32];
+  snprintf(hostIdStr, sizeof(hostIdStr), "%d", hostId);
+  setenv("NCCL_HOSTID", hostIdStr, 1);
     
-  printf("[Rank %d] Setting NCCL_HOSTID=%s, localRank=%d\n",   
-         myRank, getenv("NCCL_HOSTID"), localRank);  
+  printf("[Rank %d] Setting NCCL_HOSTID=%d, localRank=%d\n",   
+         myRank, hostId, localRank);
     
   // 计算TP和DP的color和key  
   int tp_size = 8;  
