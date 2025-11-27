@@ -135,12 +135,18 @@ int main(int argc, char* argv[])
   CUDACHECK(cudaStreamSynchronize(s));  
     
   // 清理资源  
+  printf("[Rank %d] Cleaning up resources...\n", myRank);
   CUDACHECK(cudaFree(sendbuff));  
   CUDACHECK(cudaFree(recvbuff));  
+  
+  printf("[Rank %d] Destroying TP comm...\n", myRank);
   ncclCommDestroy(tp_comm);  
+  printf("[Rank %d] Destroying DP comm...\n", myRank);
   ncclCommDestroy(dp_comm);  
+  printf("[Rank %d] Destroying global comm...\n", myRank);
   ncclCommDestroy(global_comm);  
     
+  printf("[Rank %d] Calling MPI_Finalize...\n", myRank);
   MPICHECK(MPI_Finalize());  
     
   printf("[Rank %d] Success\n", myRank);  

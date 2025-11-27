@@ -660,6 +660,8 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
   NCCLCHECK(ncclCalloc(&domains, system->nodes[GPU].count));
   NCCLCHECK(ncclCalloc(&ids, system->nodes[GPU].count));
   int myDomain = 0;
+  int myGpuFound = 0;
+  
   for (int g=0; g<system->nodes[GPU].count; g++) {
     struct ncclTopoNode* gpu = system->nodes[GPU].nodes+g;
     domains[g] = g;
@@ -669,7 +671,20 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
         domains[g] = std::min(domains[g], domains[p]);
       }
     }
-    if (gpu->gpu.rank == comm->rank) myDomain = domains[g];
+    // 使用 busId 匹配当前 rank 的 GPU，而不是用 rank
+    // 因为 gpu->gpu.rank 可能已经被重新映射为新 comm rank
+    if (gpu->id == comm->busId) {
+      myDomain = domains[g];
+      myGpuFound = 1;
+      INFO(NCCL_INIT, "[DEBUG] Found my GPU: busId=0x%lx, domain=%d", gpu->id, myDomain);
+    }
+  }
+  
+  if (!myGpuFound) {
+    WARN("Could not find my GPU (busId=0x%lx) in topology", comm->busId);
+    free(domains);
+    free(ids);
+    return ncclInternalError;
   }
 
   int ngpus = system->nodes[GPU].count;
@@ -692,13 +707,32 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
     NCCLCHECK(ncclTopoRemoveNode(system, GPU, g));
   }
 
-  if (system->nodes[GPU].count == comm->nRanks) {
+  INFO(NCCL_INIT, "[DEBUG] After GPU trim: GPU count=%d, comm->nRanks=%d, NET count=%d", 
+       system->nodes[GPU].count, comm->nRanks, system->nodes[NET].count);
+  
+  // 检查是否所有 ranks 都在同一个节点（通过 hostHash 判断）
+  int singleNode = 1;
+  if (comm->nRanks > 1) {
+    uint64_t firstHostHash = comm->peerInfo[0].hostHash;
+    for (int r = 1; r < comm->nRanks; r++) {
+      if (comm->peerInfo[r].hostHash != firstHostHash) {
+        singleNode = 0;
+        break;
+      }
+    }
+  }
+  
+  // 只有当所有 ranks 都在同一节点且 GPU count == nRanks 时，才删除 NET 设备
+  if (singleNode && system->nodes[GPU].count == comm->nRanks) {
+    INFO(NCCL_INIT, "[DEBUG] Single-node comm with all GPUs, removing NET devices");
     for (int n=system->nodes[NET].count-1; n>=0; n--)
       NCCLCHECK(ncclTopoRemoveNode(system, NET, n));
+  } else {
+    INFO(NCCL_INIT, "[DEBUG] Multi-node or partial comm, keeping NET devices (singleNode=%d)", singleNode);
   }
   free(domains);
   free(ids);
-  printf("[DEBUG] After trim: GPU count=%d\n", system->nodes[GPU].count);  
+  printf("[DEBUG] After trim: GPU count=%d, NET count=%d\n", system->nodes[GPU].count, system->nodes[NET].count);  
   fflush(stdout);  
   return ncclSuccess;
 }

@@ -603,17 +603,13 @@ static ncclResult_t xmlInitAttrFloat(struct ncclXmlNode* node, const char* attrN
 
 
 ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** system) {
-  printf("[DEBUG] ncclTopoGetSystem: entry\n"); fflush(stdout);
   struct ncclXml* xml;
   NCCLCHECK(ncclCalloc(&xml, 1));
-  printf("[DEBUG] ncclTopoGetSystem: after calloc xml\n"); fflush(stdout);
   
   char* xmlTopoFile = getenv("NCCL_TOPO_FILE");
-  printf("[DEBUG] ncclTopoGetSystem: NCCL_TOPO_FILE=%s\n", xmlTopoFile ? xmlTopoFile : "NULL"); fflush(stdout);
   if (xmlTopoFile) {
     // 方案A：根据 NCCL_HOSTID 选择不同的 XML 文件
     char* hostIdStr = getenv("NCCL_HOSTID");
-    printf("[DEBUG] ncclTopoGetSystem: NCCL_HOSTID=%s\n", hostIdStr ? hostIdStr : "NULL"); fflush(stdout);
     if (hostIdStr != NULL) {
       int hostId = atoi(hostIdStr);
       char xmlPath[512];
@@ -625,30 +621,25 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
         size_t prefixLen = lastDot - basePath;
         snprintf(xmlPath, sizeof(xmlPath), "%.*s_node%d%s", 
                  (int)prefixLen, basePath, hostId, lastDot);
-        printf("[DEBUG] ncclTopoGetSystem: loading %s\n", xmlPath); fflush(stdout);
         INFO(NCCL_ENV, "NCCL_TOPO_FILE set by environment to %s, NCCL_HOSTID=%d, loading %s", 
              xmlTopoFile, hostId, xmlPath);
         NCCLCHECK(ncclTopoGetXmlFromFile(xmlPath, xml, 1));
       } else {
         // 没有扩展名，直接追加
         snprintf(xmlPath, sizeof(xmlPath), "%s_node%d.xml", basePath, hostId);
-        printf("[DEBUG] ncclTopoGetSystem: loading %s (no ext)\n", xmlPath); fflush(stdout);
         INFO(NCCL_ENV, "NCCL_TOPO_FILE set by environment to %s, NCCL_HOSTID=%d, loading %s", 
              xmlTopoFile, hostId, xmlPath);
         NCCLCHECK(ncclTopoGetXmlFromFile(xmlPath, xml, 1));
       }
     } else {
       // 没有 NCCL_HOSTID，加载原始文件（用于全局 comm）
-      printf("[DEBUG] ncclTopoGetSystem: loading %s (no hostid)\n", xmlTopoFile); fflush(stdout);
       INFO(NCCL_ENV, "NCCL_TOPO_FILE set by environment to %s", xmlTopoFile);
       NCCLCHECK(ncclTopoGetXmlFromFile(xmlTopoFile, xml, 1));
     }
   } else {
     // Try default XML topology location
-    printf("[DEBUG] ncclTopoGetSystem: loading default\n"); fflush(stdout);
     NCCLCHECK(ncclTopoGetXmlFromFile("/var/run/nvidia-topologyd/virtualTopology.xml", xml, 0));
   }
-  printf("[DEBUG] ncclTopoGetSystem: after ncclTopoGetXmlFromFile\n"); fflush(stdout);
 
   // if (xml->maxIndex == 0) {
   //   // Create top tag

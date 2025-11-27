@@ -807,10 +807,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   // 重新映射 GPU rank 到当前 comm 的 rank（通过 busId 匹配）
   // 对于split comm，XML中的全局rank需要映射到新comm的local rank
+  // 注意：保留完整的本地拓扑，只更新 rank，不删除 GPU
+  // 这样跨节点 comm 可以通过 NET 路径连接，让 ncclTopoTrimSystem 自动处理不可达的 GPU
   if (comm->topo != NULL && comm->topo->nodes[GPU].count > 0) {
-    INFO(NCCL_INIT, "Rank %d: Remapping GPU ranks to current comm ranks via busId", rank);
+    INFO(NCCL_INIT, "Rank %d: Remapping GPU ranks to current comm ranks via busId (preserving full local topo)", rank);
     
-    int newGpuCount = 0;
     for (int g = 0; g < comm->topo->nodes[GPU].count; g++) {
       struct ncclTopoNode* gpu = comm->topo->nodes[GPU].nodes + g;
       int64_t gpuBusId = gpu->id;
@@ -826,28 +827,21 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
           INFO(NCCL_INIT, "Rank %d: Mapped GPU %d (busId=0x%lx) XML_rank=%d -> comm_rank=%d",
                rank, g, gpuBusId, xmlRank, r);
           
-          // 如果这个GPU不是第newGpuCount个，需要移动它
-          if (newGpuCount != g) {
-            comm->topo->nodes[GPU].nodes[newGpuCount] = *gpu;
-          }
-          newGpuCount++;
           found = 1;
           break;
         }
       }
       
       if (!found) {
-        INFO(NCCL_INIT, "Rank %d: GPU %d (busId=0x%lx, XML_rank=%d) not in current comm, skipping",
+        // 不在当前 comm 中的 GPU，保持其 XML rank 不变
+        // 这些 GPU 会在 ncclTopoTrimSystem 中根据 domain 被删除
+        INFO(NCCL_INIT, "Rank %d: GPU %d (busId=0x%lx, XML_rank=%d) not in current comm, keeping for NET path",
              rank, g, gpuBusId, xmlRank);
       }
     }
     
-    // 更新GPU数量
-    int originalCount = comm->topo->nodes[GPU].count;
-    comm->topo->nodes[GPU].count = newGpuCount;
-    
-    INFO(NCCL_INIT, "Rank %d: GPU rank remapping completed, kept %d/%d GPUs for comm ranks=%d",
-         rank, newGpuCount, originalCount, nranks);
+    INFO(NCCL_INIT, "Rank %d: GPU rank remapping completed for %d GPUs (nranks=%d)",
+         rank, comm->topo->nodes[GPU].count, nranks);
   }
 
   do {
