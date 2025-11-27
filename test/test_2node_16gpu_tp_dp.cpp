@@ -60,13 +60,20 @@ int main(int argc, char* argv[])
     localRank = myRank - 8;  
   }  
   
-  // 设置NCCL_HOSTID（fake_cuda需要数字）
-  char hostIdStr[32];
-  snprintf(hostIdStr, sizeof(hostIdStr), "%d", hostId);
-  setenv("NCCL_HOSTID", hostIdStr, 1);
-    
-  printf("[Rank %d] Setting NCCL_HOSTID=%d, localRank=%d\n",   
-         myRank, hostId, localRank);
+  // 不在程序内部设置 NCCL_HOSTID，由启动脚本统一设置
+  // 这样更灵活，便于调试和修改
+  char* envHostId = getenv("NCCL_HOSTID");
+  if (envHostId == NULL) {
+    // 如果脚本未设置，则使用默认逻辑
+    char hostIdStr[32];
+    snprintf(hostIdStr, sizeof(hostIdStr), "%d", hostId);
+    setenv("NCCL_HOSTID", hostIdStr, 1);
+    printf("[Rank %d] NCCL_HOSTID not set by script, setting to %d (localRank=%d)\n",   
+           myRank, hostId, localRank);
+  } else {
+    printf("[Rank %d] Using NCCL_HOSTID=%s from environment (localRank=%d)\n",   
+           myRank, envHostId, localRank);
+  }
     
   // 计算TP和DP的color和key  
   int tp_size = 8;  

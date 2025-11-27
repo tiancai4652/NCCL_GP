@@ -1424,6 +1424,16 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
 
   INFO(NCCL_INIT,"comm %p rank %d nranks %d cudaDev %d nvmlDev %d busId %lx commId 0x%llx - Init START", comm, comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, comm->busId, (unsigned long long)hashUniqueId(job->commId));
 
+  // Split comm 也需要加载拓扑（方案A：每机单独的XML）
+  if (job->parent && comm->topo == NULL) {
+    INFO(NCCL_INIT, "Rank %d: Split comm loading topology", comm->rank);
+    NCCLCHECKGOTO(ncclTopoGetSystem(comm, &comm->topo), res, fail);
+    if (comm->topo && comm->topo->nodes[GPU].count > 0) {
+      get_info_from_topo(comm->topo, comm->topo->nodes[GPU].count);
+      INFO(NCCL_INIT, "Rank %d: Split comm loaded topology with %d GPUs", comm->rank, comm->topo->nodes[GPU].count);
+    }
+  }
+
   NCCLCHECKGOTO(initTransportsRank(comm, job->parent), res, fail);
 
   // update communicator state
